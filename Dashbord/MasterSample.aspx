@@ -14,7 +14,7 @@
 <asp:Content ID="cMain" ContentPlaceHolderID="MainContent" runat="server">
 <div class="ms" id="ms">
     <div class="ms-bar">
-        <h2><i>&#9638;</i>Master Sample</h2>
+        <h2><i>&#9638;</i>Master Sample.</h2>
         <div class="ms-scan">
             <label class="fld f1" for="scan"><span class="fl"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 8v8M10 8v8M13 8v8M16 8v8"/></svg>&#9312; Unit barcode <em>/ no. / name</em></span>
                 <input type="text" id="scan" placeholder="Scan here…" autocomplete="off" autofocus /></label>
