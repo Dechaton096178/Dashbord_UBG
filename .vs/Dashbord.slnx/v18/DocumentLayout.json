@@ -3,12 +3,12 @@
   "WorkspaceRootPath": "C:\\Users\\DELL\\source\\repos\\Dashbord\\",
   "Documents": [
     {
-      "AbsoluteMoniker": "D:0:0:{35D7C7C0-17C9-49B9-8190-546FFF76E6E9}|Dashbord\\Dashbord.csproj|c:\\users\\dell\\source\\repos\\dashbord\\dashbord\\mastersample.aspx||{57312C73-6202-49E9-B1E1-40EA1A6DC1F6}",
-      "RelativeMoniker": "D:0:0:{35D7C7C0-17C9-49B9-8190-546FFF76E6E9}|Dashbord\\Dashbord.csproj|solutionrelative:dashbord\\mastersample.aspx||{57312C73-6202-49E9-B1E1-40EA1A6DC1F6}"
+      "AbsoluteMoniker": "D:0:0:{35D7C7C0-17C9-49B9-8190-546FFF76E6E9}|Dashbord\\Dashbord.csproj|C:\\Users\\DELL\\source\\repos\\Dashbord\\dashbord\\watertank.aspx.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{35D7C7C0-17C9-49B9-8190-546FFF76E6E9}|Dashbord\\Dashbord.csproj|solutionrelative:dashbord\\watertank.aspx.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
     {
-      "AbsoluteMoniker": "D:0:0:{35D7C7C0-17C9-49B9-8190-546FFF76E6E9}|Dashbord\\Dashbord.csproj|c:\\users\\dell\\source\\repos\\dashbord\\dashbord\\watertank.aspx.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{35D7C7C0-17C9-49B9-8190-546FFF76E6E9}|Dashbord\\Dashbord.csproj|solutionrelative:dashbord\\watertank.aspx.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+      "AbsoluteMoniker": "D:0:0:{35D7C7C0-17C9-49B9-8190-546FFF76E6E9}|Dashbord\\Dashbord.csproj|c:\\users\\dell\\source\\repos\\dashbord\\dashbord\\mastersample.aspx||{57312C73-6202-49E9-B1E1-40EA1A6DC1F6}",
+      "RelativeMoniker": "D:0:0:{35D7C7C0-17C9-49B9-8190-546FFF76E6E9}|Dashbord\\Dashbord.csproj|solutionrelative:dashbord\\mastersample.aspx||{57312C73-6202-49E9-B1E1-40EA1A6DC1F6}"
     }
   ],
   "DocumentGroupContainers": [
@@ -18,11 +18,47 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 0,
+          "SelectedChildIndex": 10,
           "Children": [
             {
+              "$type": "Bookmark",
+              "Name": "ST:128:0:{116d2292-e37d-41cd-a077-ebacac4c8cc4}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:130:0:{1fc202d4-d401-403c-9834-5b218574bb67}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:131:0:{1fc202d4-d401-403c-9834-5b218574bb67}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:133:0:{1fc202d4-d401-403c-9834-5b218574bb67}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:129:0:{116d2292-e37d-41cd-a077-ebacac4c8cc4}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:132:0:{116d2292-e37d-41cd-a077-ebacac4c8cc4}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:134:0:{116d2292-e37d-41cd-a077-ebacac4c8cc4}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:136:0:{1fc202d4-d401-403c-9834-5b218574bb67}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:135:0:{116d2292-e37d-41cd-a077-ebacac4c8cc4}"
+            },
+            {
               "$type": "Document",
-              "DocumentIndex": 0,
+              "DocumentIndex": 1,
               "Title": "MasterSample.aspx",
               "DocumentMoniker": "C:\\Users\\DELL\\source\\repos\\Dashbord\\Dashbord\\MasterSample.aspx",
               "RelativeDocumentMoniker": "Dashbord\\MasterSample.aspx",
@@ -35,7 +71,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 1,
+              "DocumentIndex": 0,
               "Title": "WaterTank.aspx.cs",
               "DocumentMoniker": "C:\\Users\\DELL\\source\\repos\\Dashbord\\Dashbord\\WaterTank.aspx.cs",
               "RelativeDocumentMoniker": "Dashbord\\WaterTank.aspx.cs",
