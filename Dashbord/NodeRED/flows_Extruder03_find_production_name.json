@@ -1,0 +1,74 @@
+[
+ {
+  "id": "186f0818b000aeff",
+  "type": "tab",
+  "label": "Extruder03 หา PRODUCTION NAME (CG)",
+  "disabled": false,
+  "info": "กดปุ่มเพื่อไล่หาข้อความใน D0–D2999 (อ่านอย่างเดียว)"
+ },
+ {
+  "id": "a9be5e0071861809",
+  "type": "inject",
+  "z": "186f0818b000aeff",
+  "name": "หาคำว่า CG (กด)",
+  "props": [
+   {
+    "p": "payload"
+   }
+  ],
+  "repeat": "",
+  "crontab": "",
+  "once": false,
+  "onceDelay": "1",
+  "topic": "",
+  "payload": "",
+  "payloadType": "date",
+  "x": 170,
+  "y": 80,
+  "wires": [
+   [
+    "df283f9b57e03663"
+   ]
+  ]
+ },
+ {
+  "id": "df283f9b57e03663",
+  "type": "function",
+  "z": "186f0818b000aeff",
+  "name": "หาคำว่า CG (DM/W/H)",
+  "func": "// @ts-nocheck\n// ===== หาคำที่ระบุ (เช่น \"CG\" ที่พิมพ์ในช่อง PRODUCTION NAME) ใน PLC (อ่านอย่างเดียว · กดครั้งละรอบ) =====\nconst HOST = \"192.168.250.1\", DA1 = 1, SA1 = 50;     // SA1 = เลขท้าย IP กล่อง\nconst WORD = \"CG\";                                    // คำที่ต้องการหา (พิมพ์บนจอ HMI ให้ตรงก่อนกด)\n// พื้นที่ที่ค้น: [ชื่อ, รหัสพื้นที่ FINS, เริ่ม, ถึง]\nconst AREAS = [[\"D\", 0x82, 0, 2999], [\"W\", 0xB1, 0, 511], [\"H\", 0xB2, 0, 511], [\"CIO\", 0xB0, 0, 511]];\nconst CHUNK = 200;\n\nif (context.get(\"busy\")) return null;\ncontext.set(\"busy\", true);\nconst sock = dgram.createSocket(\"udp4\");\nlet sid = 0, pending = null;\nsock.on(\"message\", r => { if (pending && r.length >= 14 && r[9] === sid) pending(null, r); });\nsock.on(\"error\", e => pending && pending(\"socket \" + e.code));\nfunction read(area, start, count) {\n    return new Promise(res => {\n        sid = (sid + 1) & 0xFF;\n        const t = setTimeout(() => pending && pending(\"timeout\"), 1200);\n        pending = (err, r) => {\n            clearTimeout(t); pending = null;\n            if (err) return res({ err });\n            const ec = r.readUInt16BE(12);\n            if (ec !== 0 && ec !== 0x0040) return res({ err: \"end code 0x\" + ec.toString(16) });\n            const w = []; for (let k = 0; k < count; k++) w.push(r.readUInt16BE(14 + k * 2));\n            res({ w });\n        };\n        sock.send(Buffer.from([0x80, 0, 0x02, 0, DA1, 0, 0, SA1, 0, sid, 0x01, 0x01, area,\n            (start >> 8) & 0xFF, start & 0xFF, 0, (count >> 8) & 0xFF, count & 0xFF]), 9600, HOST, e => { if (e && pending) pending(\"send \" + e.code); });\n    });\n}\nconst ch = c => (c >= 32 && c < 127 ? String.fromCharCode(c) : \"·\");\nconst txt = (w, swap) => { let a = (w >> 8) & 0xFF, b = w & 0xFF; if (swap) [a, b] = [b, a]; return ch(a) + ch(b); };\n\n(async () => {\n    sock.bind(0);\n    const hits = [], errs = [];\n    for (const [name, code, from, to] of AREAS) {\n        const mem = {};\n        for (let s = from; s <= to; s += CHUNK) {\n            const n = Math.min(CHUNK, to - s + 1);\n            node.status({ fill: \"blue\", shape: \"dot\", text: \"กำลังอ่าน \" + name + s + \"…\" });\n            const r = await read(code, s, n);\n            if (r.err) { errs.push(name + s + \"-\" + (s + n - 1) + \": \" + r.err); continue; }\n            r.w.forEach((v, k) => mem[s + k] = v);\n        }\n        for (const swap of [true, false]) {\n            const ds = Object.keys(mem).map(Number).sort((a, b) => a - b);\n            let line = \"\", idx = [];\n            for (const d of ds) { line += txt(mem[d], swap); idx.push(d, d); }\n            let pos = line.indexOf(WORD);\n            while (pos >= 0) {\n                const d = idx[pos];\n                const around = []; for (let k = d; k < d + 6; k++) if (mem[k] !== undefined) around.push(txt(mem[k], swap));\n                hits.push({ \"ที่อยู่\": name + d, \"แบบ\": swap ? \"NJ (สลับ byte)\" : \"ปกติ\", \"ข้อความรอบๆ\": around.join(\"\").replace(/·/g, \" \").trim(), \"ค่าดิบ\": \"0x\" + mem[d].toString(16).padStart(4, \"0\") });\n                pos = line.indexOf(WORD, pos + 1);\n            }\n        }\n    }\n    try { sock.close(); } catch (e) {}\n    context.set(\"busy\", false);\n    node.status({ fill: hits.length ? \"green\" : \"yellow\", shape: \"dot\", text: hits.length ? \"เจอ \\\"\" + WORD + \"\\\" \" + hits.length + \" ที่\" : \"ไม่เจอ \\\"\" + WORD + \"\\\"\" });\n    node.send({ payload: { \"คำที่หา\": WORD, \"เจอที่\": hits.length ? hits : \"ไม่เจอใน D0–2999 / W0–511 / H0–511 / CIO0–511\", \"อ่านไม่ได้\": errs.length ? errs : undefined } });\n})();\nreturn null;",
+  "outputs": 1,
+  "timeout": 0,
+  "noerr": 0,
+  "initialize": "",
+  "finalize": "context.set('busy', false);",
+  "libs": [
+   {
+    "var": "dgram",
+    "module": "dgram"
+   }
+  ],
+  "x": 410,
+  "y": 80,
+  "wires": [
+   [
+    "1d9c28bfd148320d"
+   ]
+  ]
+ },
+ {
+  "id": "1d9c28bfd148320d",
+  "type": "debug",
+  "z": "186f0818b000aeff",
+  "name": "ข้อความที่เจอ",
+  "active": true,
+  "tosidebar": true,
+  "console": false,
+  "tostatus": false,
+  "complete": "payload",
+  "targetType": "msg",
+  "x": 620,
+  "y": 80,
+  "wires": []
+ }
+]

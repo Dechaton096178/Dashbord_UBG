@@ -1,0 +1,581 @@
+[
+  {
+    "id": "14dfb8e735ebe701",
+    "type": "tab",
+    "label": "SB01 Seambuffing 1 → Dashboard",
+    "disabled": false,
+    "env": [],
+    "info": "Seambuffing 1 (Mitsubishi iQ-F + GOT GS21) -> CounterMachine.aspx\nTag จาก GT Designer (唇球机4新.GTX):\n D0 สถานะ (1=OP, 2=EG, 3=SV) | D322-323 入球總數 Total | D60 NG | D330-331 定位率 (/10)\n D300-301 CCD 異常 | D320 CCD OK\n*** แก้ IP ใน Connection 'SB01 PLC' ก่อน Deploy ***"
+  },
+  {
+    "id": "69755fceb87fd3b5",
+    "type": "comment",
+    "z": "14dfb8e735ebe701",
+    "name": "① อ่านค่าจริง: ใส่ address ใน 'ตั้งค่า Address' (เช่น D6100)",
+    "info": "",
+    "x": 330,
+    "y": 40,
+    "wires": []
+  },
+  {
+    "id": "a020b86562463831",
+    "type": "inject",
+    "z": "14dfb8e735ebe701",
+    "name": "อ่านทุก 3 วินาที",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "3",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "2",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 140,
+    "y": 100,
+    "wires": [
+      [
+        "cb4d79e2516e8139"
+      ]
+    ]
+  },
+  {
+    "id": "cb4d79e2516e8139",
+    "type": "function",
+    "z": "14dfb8e735ebe701",
+    "name": "ตั้งค่า Address",
+    "func": "// ===== ตั้งค่า Address ของ Seambuffing 1 (จาก GT Designer: 唇球机4新.GTX) =====\n// words: 1 = BIN16, 2 = BIN32 (Mitsubishi word ต่ำก่อน) | div = ตัวหาร\nconst TAGS = {\n    status: { address: \"D0\",   words: 1 },          // 字指示灯: 1 = OP เดินเครื่อง | 2 = EG ฉุกเฉิน/ผิดปกติ | 3 = SV\n    total:  { address: \"D322\", words: 2 },          // 入球總數 ยอดรวม (BIN32)\n    ng:     { address: \"D60\",  words: 1 },          // 不良數量 NG (BIN16)\n    rate:   { address: \"D330\", words: 2, div: 10 }, // 定位率 % (BIN32 ทศนิยม 1 ตำแหน่ง)\n    ccdNg:  { address: \"D300\", words: 2 },          // CCD 檢測異常 (BIN32)\n    ccdOk:  { address: \"D320\", words: 1 },          // CCD 檢測 OK (BIN16)\n    ok:     { address: null,   words: 2 },          // 良品數量 OK: ยังไม่รู้ address (M90 คือปุ่มรีเซ็ต) -> ใช้ Total - NG\n};\n\nconst out = [];\nfor (const [topic, t] of Object.entries(TAGS)) {\n    if (!t.address) continue;\n    const isBit = /^[MXYLBF]/i.test(t.address);\n    out.push({ topic, cfg: Object.assign({ bit: isBit }, t),\n               address: isBit || (t.words || 1) === 1 ? t.address : t.address + \",\" + t.words });\n}\nnode.status({ fill: \"blue\", shape: \"dot\", text: \"อ่าน \" + out.length + \" ค่า\" });\nreturn [out];",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 330,
+    "y": 100,
+    "wires": [
+      [
+        "bfcc7fac94e4fcd2"
+      ]
+    ]
+  },
+  {
+    "id": "bfcc7fac94e4fcd2",
+    "type": "Ind MC Read",
+    "z": "14dfb8e735ebe701",
+    "name": "PLC Seambuffing2",
+    "topic": "",
+    "connection": "01243a29e0180392",
+    "address": "address",
+    "addressType": "msg",
+    "outputFormat": 0,
+    "errorHandling": "throw",
+    "outputs": 1,
+    "x": 530,
+    "y": 100,
+    "wires": [
+      [
+        "1fec2a544a0f91ff"
+      ]
+    ]
+  },
+  {
+    "id": "1fec2a544a0f91ff",
+    "type": "function",
+    "z": "14dfb8e735ebe701",
+    "name": "decode",
+    "func": "// ดึงค่าออกจาก payload ของ Ind MC Read -> array เรียงตาม address\n// รองรับ: [..] | {D500:1, D501:2, ...} | {\"D500,100\":[..]} | {value:..} | ตัวเลข\nfunction vals(p) {\n    if (Array.isArray(p)) return p;\n    if (p && typeof p === \"object\") {\n        if (p.value !== undefined) return vals(p.value);\n        if (p.data !== undefined) return vals(p.data);\n        const k = Object.keys(p);\n        if (k.length === 1) return vals(p[k[0]]);\n        const num = s => { const m = String(s).match(/(\\d+)(?:\\.(\\d+))?$/); return m ? +m[1] : 0; };\n        return k.sort((a, b) => num(a) - num(b)).map(x => p[x]);\n    }\n    return [p];\n}\n\nconst t = msg.cfg || {};\nconst arr = vals(msg.payload);\nlet n;\nconst w32 = (lo, hi) => (Number(hi) & 0xFFFF) * 65536 + (Number(lo) & 0xFFFF);\nif (msg.topic === \"block\") {                          // D6100-D6109\n    if (arr.length < 10) { node.warn(\"บล็อก D6100 ได้ไม่ครบ: \" + JSON.stringify(msg.payload)); return null; }\n    const db = flow.get(\"sb_data\") || {};\n    db.plcStatus = Number(arr[0]);                     // 1 ว่าง | 2 เดินเครื่อง | 3 ผิดปกติ\n    db.runSec = w32(arr[2], arr[3]);\n    db.onSec  = w32(arr[4], arr[5]);\n    db.ok     = w32(arr[6], arr[7]);\n    db.rpm    = w32(arr[8], arr[9]);\n    flow.set(\"sb_data\", db); flow.set(\"sb_lastOk\", Date.now());\n    node.status({ fill: \"green\", shape: \"dot\", text: \"สถานะ \" + db.plcStatus + \" OK \" + db.ok + \" \" + new Date().toLocaleTimeString(\"en-GB\") });\n    msg.payload = db; return msg;\n}\nif (t.bit) n = (arr[0] === true || Number(arr[0]) !== 0) ? 1 : 0;\nelse if ((t.words || 1) === 2) {\n    n = (Number(arr[1]) & 0xFFFF) * 65536 + (Number(arr[0]) & 0xFFFF);   // word ต่ำก่อน\n    if (n > 0x7FFFFFFF) n -= 0x100000000;\n} else n = Number(arr[0]);\nif (t.div) n = n / t.div;\nif (!Number.isFinite(n)) { node.warn(msg.topic + \" อ่านไม่ได้: \" + JSON.stringify(msg.payload)); return null; }\n\nconst d = flow.get(\"sb_data\") || {};\nswitch (msg.topic) {\n    case \"total\": d.total = n; flow.set(\"sb_lastOk\", Date.now()); break;\n    case \"ok\":    d.ok = n; break;\n    case \"ng\":    d.ng = n; break;\n    case \"speed\": d.speed = n; break;\n    case \"auto\":  d.auto = n !== 0; break;\n    case \"alarm\": d.alarm = n !== 0; break;\n    case \"status\": d.statusWord = n; flow.set(\"sb_lastOk\", Date.now()); break;\n    case \"rate\":  d.rate = n; break;\n    case \"ccdNg\": d.ccdNg = n; break;\n    case \"ccdOk\": d.ccdOk = n; break;\n    default: return null;\n}\nflow.set(\"sb_data\", d);\nnode.status({ fill: \"green\", shape: \"dot\", text: msg.topic + \"=\" + n + \" \" + new Date().toLocaleTimeString(\"en-GB\") });\nmsg.payload = d;\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 710,
+    "y": 100,
+    "wires": [
+      [
+        "3ae5a3bef9de7175"
+      ]
+    ]
+  },
+  {
+    "id": "3ae5a3bef9de7175",
+    "type": "debug",
+    "z": "14dfb8e735ebe701",
+    "name": "decoded (ปิดไว้)",
+    "active": false,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 890,
+    "y": 100,
+    "wires": []
+  },
+  {
+    "id": "6d6f5fb9bc4f2d70",
+    "type": "comment",
+    "z": "14dfb8e735ebe701",
+    "name": "(ตัวช่วย) ดูค่า D6100-D6139 ถ้า PLC เครื่องนี้มีตาราง D6100 ด้วย",
+    "info": "",
+    "x": 360,
+    "y": 160,
+    "wires": []
+  },
+  {
+    "id": "88955b626b2aa288",
+    "type": "inject",
+    "z": "14dfb8e735ebe701",
+    "name": "อ่านบล็อก D6100 (กดเอง)",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": "2",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 170,
+    "y": 200,
+    "wires": [
+      [
+        "57c2452602ecf0b6"
+      ]
+    ]
+  },
+  {
+    "id": "57c2452602ecf0b6",
+    "type": "Ind MC Read",
+    "z": "14dfb8e735ebe701",
+    "name": "D6100,40",
+    "topic": "",
+    "connection": "01243a29e0180392",
+    "address": "D6100,40",
+    "addressType": "str",
+    "outputFormat": 0,
+    "errorHandling": "throw",
+    "outputs": 1,
+    "x": 370,
+    "y": 200,
+    "wires": [
+      [
+        "c65cfd27c0bf4379"
+      ]
+    ]
+  },
+  {
+    "id": "c65cfd27c0bf4379",
+    "type": "function",
+    "z": "14dfb8e735ebe701",
+    "name": "จัดรูป",
+    "func": "// ดึงค่าออกจาก payload ของ Ind MC Read -> array เรียงตาม address\n// รองรับ: [..] | {D500:1, D501:2, ...} | {\"D500,100\":[..]} | {value:..} | ตัวเลข\nfunction vals(p) {\n    if (Array.isArray(p)) return p;\n    if (p && typeof p === \"object\") {\n        if (p.value !== undefined) return vals(p.value);\n        if (p.data !== undefined) return vals(p.data);\n        const k = Object.keys(p);\n        if (k.length === 1) return vals(p[k[0]]);\n        const num = s => { const m = String(s).match(/(\\d+)(?:\\.(\\d+))?$/); return m ? +m[1] : 0; };\n        return k.sort((a, b) => num(a) - num(b)).map(x => p[x]);\n    }\n    return [p];\n}\n\n// แสดงเป็น { D6100: ค่า, ... }\nif (msg.payload && typeof msg.payload === \"object\" && !Array.isArray(msg.payload) && Object.keys(msg.payload).length > 1) return msg;\nconst v = vals(msg.payload), o = {};\nv.forEach((x, i) => o[\"D\" + (6100 + i)] = x);\nmsg.payload = o;\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 530,
+    "y": 200,
+    "wires": [
+      [
+        "526855e6983ec572"
+      ]
+    ]
+  },
+  {
+    "id": "526855e6983ec572",
+    "type": "debug",
+    "z": "14dfb8e735ebe701",
+    "name": "บล็อก D6100",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 700,
+    "y": 200,
+    "wires": []
+  },
+  {
+    "id": "7ed558d4504e5a14",
+    "type": "comment",
+    "z": "14dfb8e735ebe701",
+    "name": "② ทดสอบหน้าเว็บด้วยค่าตัวอย่าง (กดเอง)",
+    "info": "",
+    "x": 250,
+    "y": 260,
+    "wires": []
+  },
+  {
+    "id": "66dfae631c1405e7",
+    "type": "inject",
+    "z": "14dfb8e735ebe701",
+    "name": "ทดสอบด้วยค่าตัวอย่าง",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": "2",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 170,
+    "y": 300,
+    "wires": [
+      [
+        "d883134e8c233192"
+      ]
+    ]
+  },
+  {
+    "id": "d883134e8c233192",
+    "type": "function",
+    "z": "14dfb8e735ebe701",
+    "name": "ค่าตัวอย่างจากจอ",
+    "func": "// ค่าตัวอย่าง (ทดสอบเส้นทางไป Dashboard โดยไม่ต้องต่อ PLC)\nconst t = (flow.get(\"sb_test\") || 2500) + 1; flow.set(\"sb_test\", t);\nconst w = v => [v & 0xFFFF, v >>> 16];\nreturn [[\n    { topic: \"status\", cfg: { words: 1 }, payload: [1] },\n    { topic: \"total\",  cfg: { words: 2 }, payload: w(t) },\n    { topic: \"ng\",     cfg: { words: 1 }, payload: [120] },\n    { topic: \"rate\",   cfg: { words: 2, div: 10 }, payload: w(822) },\n    { topic: \"ccdOk\",  cfg: { words: 1 }, payload: [t - 130] },\n    { topic: \"ccdNg\",  cfg: { words: 2 }, payload: w(10) }\n]];",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 390,
+    "y": 300,
+    "wires": [
+      [
+        "1fec2a544a0f91ff"
+      ]
+    ]
+  },
+  {
+    "id": "42668e0259bdcacd",
+    "type": "inject",
+    "z": "14dfb8e735ebe701",
+    "name": "ส่งทุก 5 วินาที",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "5",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "2",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 150,
+    "y": 360,
+    "wires": [
+      [
+        "324abd186175d699"
+      ]
+    ]
+  },
+  {
+    "id": "324abd186175d699",
+    "type": "function",
+    "z": "14dfb8e735ebe701",
+    "name": "build JSON",
+    "func": "// สร้าง JSON ส่งไป CounterMachine.aspx (รูปแบบเดียวกับเครื่องฉีด + OK/NG)\nconst MACHINE  = \"SB01\";          // หน้าเว็บแสดงเป็น \"Seambuffing 1\"\nconst PROCESS  = \"Seambuffing\";   // แท็บ Process บน MC Monitor\nconst STALE_MS = 10000;\n\nconst d = flow.get(\"sb_data\");\nconst online = !!d && (Date.now() - (flow.get(\"sb_lastOk\") || 0)) < STALE_MS;\n\nif (online) {\n    // แปลงเป็นรหัสสถานะเดียวกับเครื่องฉีด: 4 = Running, 1 = Idle, 18 = Breakdown\n    // D6100: 1 ว่าง -> 1 (Idle) | 2 เดินเครื่อง -> 4 (Running) | 3 ผิดปกติ -> 18 (Breakdown)\n    // D0 (จอ GOT): 1 OP -> 4 Running | 2 EG -> 18 Breakdown | 3 SV / อื่นๆ -> 1 Idle\n    const status = d.statusWord != null ? ({ 1: 4, 2: 18 }[d.statusWord] ?? 1)\n                 : d.plcStatus != null ? ({ 1: 1, 2: 4, 3: 18 }[d.plcStatus] ?? 1)\n                                       : (d.alarm ? 18 : (d.auto ? 4 : 1));\n    const TXT = { 1: \"Idle\", 4: \"Running\", 18: \"Abnormal\" };\n    msg.payload = {\n        machine: MACHINE, process: PROCESS, online: true, power: \"ON\",\n        status: status, statusText: TXT[status],\n        shotCount: d.total ?? null,\n        okCount: d.ok ?? (d.total != null && d.ng != null ? Math.max(0, d.total - d.ng) : null),\n        ngCount: d.ng ?? null,\n        speedPerMin: d.speed ?? null,\n        cycleTime: d.speed > 0 ? Math.round(6000 / d.speed) / 100 : null,   // วินาทีต่อชิ้น\n        cavities: 1,\n        plcRunSec: d.runSec ?? null,      // D6102 เวลาเดินเครื่องสะสม (วินาที)\n        plcOnSec: d.onSec ?? null,        // D6104 เวลาเปิดเครื่องสะสม (วินาที)\n        rpm: d.rpm ?? null,\n        positioningRate: d.rate ?? null,  // 定位率 %\n        ccdOk: d.ccdOk ?? null,\n        ccdNg: d.ccdNg ?? null,               // D6108 รอบมอเตอร์หลัก\n        ts: new Date().toISOString()\n    };\n} else {\n    msg.payload = { machine: MACHINE, process: PROCESS, online: false, power: \"OFF\", ts: new Date().toISOString() };\n}\nmsg.headers = { \"Content-Type\": \"application/json\" };\nmsg.requestTimeout = 4000;\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 340,
+    "y": 360,
+    "wires": [
+      [
+        "52e5e858e9a441d8"
+      ]
+    ]
+  },
+  {
+    "id": "52e5e858e9a441d8",
+    "type": "http request",
+    "z": "14dfb8e735ebe701",
+    "name": "POST CounterMachine.aspx",
+    "method": "POST",
+    "ret": "txt",
+    "paytoqs": "ignore",
+    "url": "http://192.168.100.20/Dashboard/CounterMachine.aspx",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 560,
+    "y": 360,
+    "wires": [
+      [
+        "f3dcb4a92e6ee002"
+      ]
+    ]
+  },
+  {
+    "id": "f3dcb4a92e6ee002",
+    "type": "debug",
+    "z": "14dfb8e735ebe701",
+    "name": "server response",
+    "active": false,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": true,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "statusCode",
+    "statusType": "msg",
+    "x": 790,
+    "y": 360,
+    "wires": []
+  },
+  {
+    "id": "6aaaebc95709689a",
+    "type": "catch",
+    "z": "14dfb8e735ebe701",
+    "name": "จับ error การส่ง",
+    "scope": [
+      "52e5e858e9a441d8"
+    ],
+    "uncaught": false,
+    "x": 160,
+    "y": 410,
+    "wires": [
+      [
+        "b940952bd1747cf2"
+      ]
+    ]
+  },
+  {
+    "id": "b940952bd1747cf2",
+    "type": "debug",
+    "z": "14dfb8e735ebe701",
+    "name": "HTTP error",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "error.message",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 380,
+    "y": 410,
+    "wires": []
+  },
+  {
+    "id": "c7dfdb881c45274a",
+    "type": "comment",
+    "z": "14dfb8e735ebe701",
+    "name": "③ หา Address: แก้ TARGETS ใน 'จับคู่กับค่าบนจอ' ให้ตรงจอ แล้วกด Scan -> ดูผลในแท็บ Debug",
+    "info": "",
+    "x": 400,
+    "y": 470,
+    "wires": []
+  },
+  {
+    "id": "24a6cbbf0cd46ad4",
+    "type": "inject",
+    "z": "14dfb8e735ebe701",
+    "name": "Scan D0-D11999",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": "2",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 150,
+    "y": 520,
+    "wires": [
+      [
+        "f5336ee61fc503b2"
+      ]
+    ]
+  },
+  {
+    "id": "f5336ee61fc503b2",
+    "type": "function",
+    "z": "14dfb8e735ebe701",
+    "name": "สร้างช่วงสแกน",
+    "func": "// สแกน D register ทีละ 100 ตัว (ช่วงที่อ่านไม่ได้จะถูกข้าม)\nconst FROM = 0, TO = 12000, STEP = 100;\nflow.set(\"scan_hits\", []); flow.set(\"scan_fail\", []);\nconst out = [];\nfor (let a = FROM; a < TO; a += STEP) out.push({ topic: \"scan\", retry: 0, start: a, address: \"D\" + a + \",\" + STEP });\nnode.status({ fill: \"blue\", shape: \"ring\", text: \"กำลังสแกน \" + out.length + \" ช่วง...\" });\nreturn [out];",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 340,
+    "y": 520,
+    "wires": [
+      [
+        "5400fc946700f977"
+      ]
+    ]
+  },
+  {
+    "id": "5400fc946700f977",
+    "type": "delay",
+    "z": "14dfb8e735ebe701",
+    "name": "2 ช่วง/วินาที",
+    "pauseType": "rate",
+    "timeout": "5",
+    "timeoutUnits": "seconds",
+    "rate": "2",
+    "nbRateUnits": "1",
+    "rateUnits": "second",
+    "randomFirst": "1",
+    "randomLast": "5",
+    "randomUnits": "seconds",
+    "drop": false,
+    "allowrate": false,
+    "outputs": 1,
+    "x": 520,
+    "y": 520,
+    "wires": [
+      [
+        "b8e812f0fb647b48"
+      ]
+    ]
+  },
+  {
+    "id": "b8e812f0fb647b48",
+    "type": "Ind MC Read",
+    "z": "14dfb8e735ebe701",
+    "name": "PLC scan",
+    "topic": "",
+    "connection": "01243a29e0180392",
+    "address": "address",
+    "addressType": "msg",
+    "outputFormat": 0,
+    "errorHandling": "throw",
+    "outputs": 1,
+    "x": 680,
+    "y": 520,
+    "wires": [
+      [
+        "efa2143d5f8cdd1f"
+      ]
+    ]
+  },
+  {
+    "id": "efa2143d5f8cdd1f",
+    "type": "function",
+    "z": "14dfb8e735ebe701",
+    "name": "จับคู่กับค่าบนจอ",
+    "func": "// ดึงค่าออกจาก payload ของ Ind MC Read -> array เรียงตาม address\n// รองรับ: [..] | {D500:1, D501:2, ...} | {\"D500,100\":[..]} | {value:..} | ตัวเลข\nfunction vals(p) {\n    if (Array.isArray(p)) return p;\n    if (p && typeof p === \"object\") {\n        if (p.value !== undefined) return vals(p.value);\n        if (p.data !== undefined) return vals(p.data);\n        const k = Object.keys(p);\n        if (k.length === 1) return vals(p[k[0]]);\n        const num = s => { const m = String(s).match(/(\\d+)(?:\\.(\\d+))?$/); return m ? +m[1] : 0; };\n        return k.sort((a, b) => num(a) - num(b)).map(x => p[x]);\n    }\n    return [p];\n}\n\n// หา D ที่ค่าใกล้กับตัวเลขบนจอ (แก้ TARGETS ให้ตรงกับจอตอนกด Scan)\nconst TARGETS = { total: 2523, ok: 2075, ng: 448, speed: 45, rate: 82.2 };\nconst COUNTER_TOL = 200;\nconst v = vals(msg.payload).map(x => Number(x) & 0xFFFF);\nconst found = [];\nfor (let i = 0; i < v.length; i++) {\n    const a = msg.start + i, w = v[i], nx = v[i + 1];\n    const cands = [[w, \"16bit\"]];\n    if (nx) cands.push([nx * 65536 + w, \"32bit (D\" + a + \"-D\" + (a + 1) + \")\"]);\n    for (const [name, tv] of Object.entries(TARGETS)) {\n        const isCounter = [\"total\", \"ok\", \"ng\"].includes(name);\n        for (const [x, kind] of cands)\n            for (const div of (isCounter ? [1] : [1, 10, 100]))\n                if (x !== 0 && Math.abs(x / div - tv) <= (isCounter ? COUNTER_TOL : 0.6))\n                    found.push({ tag: name, address: \"D\" + a, value: x / div, kind, div });\n    }\n}\nconst hits = flow.get(\"scan_hits\") || []; hits.push(...found); flow.set(\"scan_hits\", hits);\nnode.status({ fill: \"green\", shape: \"dot\", text: \"เจอ \" + hits.length + \" (ล่าสุด D\" + msg.start + \")\" });\nif (!found.length) return null;\nmsg.payload = found;\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 540,
+    "y": 580,
+    "wires": [
+      [
+        "3ad369410aa4570a"
+      ]
+    ]
+  },
+  {
+    "id": "3ad369410aa4570a",
+    "type": "debug",
+    "z": "14dfb8e735ebe701",
+    "name": "ผล Scan (address ที่น่าจะใช่)",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 780,
+    "y": 580,
+    "wires": []
+  },
+  {
+    "id": "dad511b47d5db997",
+    "type": "catch",
+    "z": "14dfb8e735ebe701",
+    "name": "ช่วงที่ timeout",
+    "scope": [
+      "b8e812f0fb647b48"
+    ],
+    "uncaught": false,
+    "x": 170,
+    "y": 580,
+    "wires": [
+      [
+        "b08623b70e97c12a"
+      ]
+    ]
+  },
+  {
+    "id": "b08623b70e97c12a",
+    "type": "function",
+    "z": "14dfb8e735ebe701",
+    "name": "ลองใหม่ 2 ครั้ง",
+    "func": "// ช่วงที่ timeout -> ลองใหม่ (สูงสุด 2 ครั้ง) แล้วข้าม\nconst r = (msg.retry || 0) + 1;\nif (r > 2) { const s = flow.get(\"scan_fail\") || []; s.push(\"D\" + msg.start); flow.set(\"scan_fail\", s);\n             node.status({ fill: \"red\", shape: \"ring\", text: \"ข้าม: \" + s.join(\", \") }); return null; }\nreturn { topic: \"scan\", retry: r, start: msg.start, address: msg.address };",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 380,
+    "y": 580,
+    "wires": [
+      [
+        "5400fc946700f977"
+      ]
+    ]
+  },
+  {
+    "id": "01243a29e0180392",
+    "type": "Ind MC Protocol Connection",
+    "name": "SB01 PLC (แก้ IP)",
+    "host": "192.168.0.101",
+    "port": "502",
+    "protocol": "TCP",
+    "frame": "3E",
+    "plcType": "Q",
+    "ascii": false,
+    "PLCStation": "",
+    "PCStation": "",
+    "PLCModuleNo": "",
+    "network": "",
+    "octalInputOutput": false,
+    "timeout": 3000,
+    "autoConnect": true
+  }
+]

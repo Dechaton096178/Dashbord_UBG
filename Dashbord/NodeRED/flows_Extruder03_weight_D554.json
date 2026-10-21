@@ -1,0 +1,153 @@
+[
+ {
+  "id": "2f8c3bc474c6608d",
+  "type": "tab",
+  "label": "Extruder03 ชั่งน้ำหนัก",
+  "disabled": false,
+  "info": "อ่าน D554 (+D555) จาก PLC Omron NJ 192.168.250.1 ผ่าน FINS UDP 9600\nใช้ node-red-contrib-omron-fins"
+ },
+ {
+  "id": "032a630b7a49e85c",
+  "type": "comment",
+  "z": "2f8c3bc474c6608d",
+  "name": "① เปิด node 'อ่าน D554' เลือก Connection = OmronNJExtruder03  ② Deploy  ③ ดู Debug",
+  "info": "",
+  "x": 380,
+  "y": 40,
+  "wires": []
+ },
+ {
+  "id": "bcaa2cdb86dfe473",
+  "type": "inject",
+  "z": "2f8c3bc474c6608d",
+  "name": "ทุก 1 วินาที",
+  "props": [
+   {
+    "p": "payload"
+   }
+  ],
+  "repeat": "1",
+  "crontab": "",
+  "once": true,
+  "onceDelay": "2",
+  "topic": "",
+  "payload": "",
+  "payloadType": "date",
+  "x": 140,
+  "y": 100,
+  "wires": [
+   [
+    "0c79ee87ec74115f"
+   ]
+  ]
+ },
+ {
+  "id": "0c79ee87ec74115f",
+  "type": "FINS Read",
+  "z": "2f8c3bc474c6608d",
+  "name": "อ่าน D554 (2 words)",
+  "connection": "",
+  "addressType": "str",
+  "address": "D554",
+  "countType": "num",
+  "count": "2",
+  "outputFormatType": "list",
+  "outputFormat": "unsigned",
+  "msgPropertyType": "str",
+  "msgProperty": "payload",
+  "x": 330,
+  "y": 100,
+  "wires": [
+   [
+    "120fc6f0b9868548"
+   ]
+  ]
+ },
+ {
+  "id": "120fc6f0b9868548",
+  "type": "function",
+  "z": "2f8c3bc474c6608d",
+  "name": "แปลงเป็นน้ำหนัก",
+  "func": "// ===== Extruder03 : ค่าชั่งน้ำหนักจาก PLC Omron NJ 192.168.250.1 (D554) =====\n// msg.payload จาก FINS Read = [D554, D555] (แบบ unsigned)\n// ยังไม่รู้ว่า PLC เก็บน้ำหนักแบบไหน -> แสดงทุกแบบให้เทียบกับจอเครื่อง แล้วเลือก FORMAT ให้ตรง\nconst FORMAT = \"int16\";   // \"int16\" | \"uint16\" | \"int32\" | \"float\"\nconst DIV    = 1;         // ถ้าจอเครื่องโชว์ 12.5 แต่ค่าได้ 125 -> ใส่ 10  (ได้ 1250 -> 100)\nconst UNIT   = \"kg\";\n\nconst w = Array.isArray(msg.payload) ? msg.payload.map(v => v & 0xFFFF) : null;\nif (!w || w.length < 2) { node.status({ fill: \"red\", shape: \"ring\", text: \"อ่านไม่ได้\" }); return [null, { payload: { error: \"ข้อมูลไม่ครบ\", raw: msg.payload } }]; }\n\nconst lo = w[0], hi = w[1];                       // Omron: word ต่ำอยู่ address น้อย (D554), word สูงที่ D555\nconst b = Buffer.alloc(4); b.writeUInt16BE(hi, 0); b.writeUInt16BE(lo, 2);\nconst all = {\n    int16:  lo > 32767 ? lo - 65536 : lo,\n    uint16: lo,\n    int32:  b.readInt32BE(0),\n    float:  Math.round(b.readFloatBE(0) * 1000) / 1000\n};\nconst weight = Math.round(all[FORMAT] / DIV * 1000) / 1000;\n\nflow.set(\"ex03_weight\", { weight, unit: UNIT, ts: Date.now() });\nnode.status({ fill: \"green\", shape: \"dot\", text: weight + \" \" + UNIT + \"  (D554=\" + lo + \")\" });\n\nreturn [\n    { payload: { machine: \"Extruder03\", weight, unit: UNIT, time: new Date().toLocaleTimeString(\"th-TH\") } },\n    { payload: { \"D554 (raw)\": lo, \"D555 (raw)\": hi,\n                 \"ถ้าเป็น INT 16 บิต\": all.int16, \"ถ้าเป็น UINT 16 บิต\": all.uint16,\n                 \"ถ้าเป็น DINT 32 บิต (D554-555)\": all.int32, \"ถ้าเป็น REAL ทศนิยม (D554-555)\": all.float,\n                 \"ใช้อยู่\": FORMAT + (DIV !== 1 ? \" / \" + DIV : \"\") } }\n];",
+  "outputs": 2,
+  "timeout": 0,
+  "noerr": 0,
+  "initialize": "",
+  "finalize": "",
+  "libs": [],
+  "x": 550,
+  "y": 100,
+  "wires": [
+   [
+    "c37f4b12f0a7d5ca"
+   ],
+   [
+    "4fdde478c02587db"
+   ]
+  ]
+ },
+ {
+  "id": "c37f4b12f0a7d5ca",
+  "type": "debug",
+  "z": "2f8c3bc474c6608d",
+  "name": "น้ำหนัก",
+  "active": true,
+  "tosidebar": true,
+  "console": false,
+  "tostatus": false,
+  "complete": "payload",
+  "targetType": "msg",
+  "x": 760,
+  "y": 80,
+  "wires": []
+ },
+ {
+  "id": "4fdde478c02587db",
+  "type": "debug",
+  "z": "2f8c3bc474c6608d",
+  "name": "เทียบทุกรูปแบบ (เลือก FORMAT)",
+  "active": true,
+  "tosidebar": true,
+  "console": false,
+  "tostatus": false,
+  "complete": "payload",
+  "targetType": "msg",
+  "x": 810,
+  "y": 120,
+  "wires": []
+ },
+ {
+  "id": "06f9e1ecc6fc41b9",
+  "type": "catch",
+  "z": "2f8c3bc474c6608d",
+  "name": "error FINS",
+  "scope": [
+   "0c79ee87ec74115f"
+  ],
+  "uncaught": false,
+  "x": 330,
+  "y": 170,
+  "wires": [
+   [
+    "01a33a83b86e69e9"
+   ]
+  ]
+ },
+ {
+  "id": "01a33a83b86e69e9",
+  "type": "debug",
+  "z": "2f8c3bc474c6608d",
+  "name": "FINS error",
+  "active": true,
+  "tosidebar": true,
+  "console": false,
+  "tostatus": true,
+  "complete": "error.message",
+  "targetType": "msg",
+  "statusVal": "error.message",
+  "statusType": "msg",
+  "x": 540,
+  "y": 170,
+  "wires": []
+ }
+]

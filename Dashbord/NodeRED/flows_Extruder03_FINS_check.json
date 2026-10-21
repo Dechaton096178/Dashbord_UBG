@@ -1,0 +1,116 @@
+[
+ {
+  "id": "7c6017d4bc66a665",
+  "type": "tab",
+  "label": "Extruder03 ตรวจ FINS",
+  "disabled": false,
+  "info": "หาสาเหตุ FINS timeout ของ PLC Omron 192.168.250.1"
+ },
+ {
+  "id": "83d142bdfb23b21b",
+  "type": "comment",
+  "z": "7c6017d4bc66a665",
+  "name": "Deploy แล้วกดปุ่มหน้า inject → ดู Debug 'ผลตรวจ FINS'",
+  "info": "",
+  "x": 300,
+  "y": 40,
+  "wires": []
+ },
+ {
+  "id": "a3ee1e773ab49a27",
+  "type": "inject",
+  "z": "7c6017d4bc66a665",
+  "name": "ตรวจ (กด / ทุก 30 วิ)",
+  "props": [
+   {
+    "p": "payload"
+   }
+  ],
+  "repeat": "30",
+  "crontab": "",
+  "once": true,
+  "onceDelay": "3",
+  "topic": "",
+  "payload": "",
+  "payloadType": "date",
+  "x": 150,
+  "y": 100,
+  "wires": [
+   [
+    "eef267ef9ffac5b4"
+   ]
+  ]
+ },
+ {
+  "id": "eef267ef9ffac5b4",
+  "type": "exec",
+  "z": "7c6017d4bc66a665",
+  "command": "ping -c 3 -W 1 192.168.250.1",
+  "addpay": "",
+  "append": "",
+  "useSpawn": "false",
+  "timer": "8",
+  "winHide": false,
+  "oldrc": false,
+  "name": "ping 192.168.250.1",
+  "x": 360,
+  "y": 100,
+  "wires": [
+   [
+    "0debfc3c3adc9722"
+   ],
+   [
+    "0debfc3c3adc9722"
+   ],
+   []
+  ]
+ },
+ {
+  "id": "0debfc3c3adc9722",
+  "type": "function",
+  "z": "7c6017d4bc66a665",
+  "name": "ตรวจ FINS D554",
+  "func": "// @ts-nocheck\n// ตรวจหาสาเหตุ FINS timeout : ping + IP ของกล่อง + ยิง FINS อ่าน D554 เอง (UDP หลายแบบ + TCP)\nconst HOST = \"192.168.250.1\", DA1 = 1, ADDR = 554, TMO = 1500;\nconst txt = String(msg.payload || \"\");\nconst m = txt.match(/(\\d+) packets transmitted, (\\d+) (?:packets )?received/);\nconst sent = m ? +m[1] : 0, recv = m ? +m[2] : 0;\n// IP ทุกการ์ดของกล่อง\nconst ifs = [];\nfor (const [name, arr] of Object.entries(os.networkInterfaces()))\n    for (const a of arr) if (a.family === \"IPv4\" || a.family === 4) ifs.push(name + \" \" + a.address + \"/\" + (a.cidr || \"\").split(\"/\")[1]);\nconst my = Object.values(os.networkInterfaces()).flat().find(a => (a.family === \"IPv4\" || a.family === 4) && a.address.startsWith(\"192.168.250.\"));\nconst myNode = my ? +my.address.split(\".\")[3] : null;\n\nfunction finsFrame(sa1, sid) {\n    return Buffer.from([0x80, 0x00, 0x02, 0x00, DA1, 0x00, 0x00, sa1, 0x00, sid,\n        0x01, 0x01, 0x82, (ADDR >> 8) & 0xFF, ADDR & 0xFF, 0x00, 0x00, 0x02]);   // อ่าน DM 554 จำนวน 2 word\n}\nfunction parse(r) {\n    if (r.length < 14) return \"ตอบสั้นผิดปกติ \" + r.toString(\"hex\");\n    const ec = r.readUInt16BE(12);\n    if (ec !== 0 && ec !== 0x0040) return \"PLC ตอบ error code 0x\" + ec.toString(16).padStart(4, \"0\") + (ec === 0x1103 || ec === 0x1101 ? \" (address ใช้ไม่ได้ → NJ ยังไม่ผูกตัวแปร AT %D554)\" : \"\");\n    const a = r.readUInt16BE(14), b = r.length >= 18 ? r.readUInt16BE(16) : 0;\n    return \"✓ ได้ค่า D554=\" + a + \" D555=\" + b;\n}\nfunction udp(sa1, bindPort) {\n    return new Promise(res => {\n        const s = dgram.createSocket(\"udp4\"); let done = false;\n        const end = r => { if (done) return; done = true; try { s.close(); } catch (e) {} res(\"UDP SA1=\" + sa1 + \" (src port \" + (bindPort || \"สุ่ม\") + \"): \" + r); };\n        s.on(\"error\", e => end(\"error \" + e.code + (e.code === \"EADDRINUSE\" ? \" (port 9600 ถูกใช้อยู่ — FINS node จองไว้)\" : \"\")));\n        s.on(\"message\", r => end(parse(r)));\n        s.bind(bindPort || 0, () => {\n            s.send(finsFrame(sa1, 0x11), 9600, HOST, e => { if (e) end(\"send error \" + e.code); });\n            setTimeout(() => end(\"timeout ✗ (PLC ไม่ตอบ)\"), TMO);\n        });\n    });\n}\nfunction tcp() {\n    return new Promise(res => {\n        const s = new net.Socket(); let buf = Buffer.alloc(0), step = 0, done = false;\n        const end = r => { if (done) return; done = true; s.destroy(); res(\"TCP 9600: \" + r); };\n        s.setTimeout(TMO * 2);\n        s.on(\"timeout\", () => end(step ? \"ต่อได้แต่ไม่ตอบ FINS ✗\" : \"timeout ✗\"));\n        s.on(\"error\", e => end(e.code === \"ECONNREFUSED\" ? \"ปิด ✗ (PLC ไม่เปิด FINS/TCP)\" : \"error \" + e.code));\n        s.on(\"connect\", () => { step = 1; s.write(Buffer.from([0x46,0x49,0x4E,0x53, 0,0,0,0x0C, 0,0,0,0, 0,0,0,0, 0,0,0,0])); });\n        s.on(\"data\", d => {\n            buf = Buffer.concat([buf, d]); if (buf.length < 16) return;\n            const len = buf.readUInt32BE(4); if (buf.length < 8 + len) return;\n            const cmd = buf.readUInt32BE(8), err = buf.readUInt32BE(12);\n            if (step === 1) {\n                if (cmd !== 1 || err) return end(\"handshake ไม่ผ่าน err=\" + err);\n                const cli = buf[19], srv = buf[23]; step = 2; buf = Buffer.alloc(0);\n                const f = finsFrame(cli, 0x12); f[4] = srv;\n                const h = Buffer.alloc(16); h.write(\"FINS\"); h.writeUInt32BE(8 + f.length, 4); h.writeUInt32BE(2, 8);\n                s.write(Buffer.concat([h, f]));\n                s._nodes = \"client node \" + cli + \" / PLC node \" + srv;\n            } else end(parse(buf.slice(16)) + \" · \" + s._nodes);\n        });\n        s.connect(9600, HOST);\n    });\n}\n\n(async () => {\n    const r = [];\n    const tries = [...new Set([myNode, 2, 0].filter(v => v !== null))];\n    for (const sa of tries) r.push(await udp(sa, 0));\n    r.push(await udp(myNode != null ? myNode : 2, 9600));\n    r.push(await tcp());\n    const ok = r.some(x => x.includes(\"✓\"));\n    const tips = [];\n    if (!my) tips.push(\"กล่องไม่มี IP วง 192.168.250.x → ตั้ง eth0 = 192.168.250.2/24 (ไม่ใส่ gateway)\");\n    else if (myNode !== 2) tips.push(\"IP กล่องคือ \" + my.address + \" → ใน FINS Connection ให้ตั้ง SA1 = \" + myNode + \" (ตอนนี้ตั้ง 2)\");\n    if (!recv) tips.push(\"ping ไม่ตอบ → เช็คสาย LAN / IP / PLC เปิดอยู่ไหม\");\n    const okLine = r.find(x => x.includes(\"✓\"));\n    if (okLine) tips.push(\"ใช้แบบนี้ได้: \" + okLine);\n    node.status({ fill: ok ? \"green\" : recv ? \"yellow\" : \"red\", shape: \"dot\", text: \"ping \" + recv + \"/\" + sent + (ok ? \" | FINS ✓\" : \" | FINS ✗\") });\n    node.send({ payload: { เวลา: new Date().toLocaleString(\"en-GB\"), IPกล่อง: ifs, ping: HOST + \" \" + recv + \"/\" + sent + \" ตอบ\", ผลทดสอบFINS: r, แนะนำ: tips } });\n})();\nreturn null;",
+  "outputs": 1,
+  "timeout": 0,
+  "noerr": 0,
+  "initialize": "",
+  "finalize": "",
+  "libs": [
+   {
+    "var": "net",
+    "module": "net"
+   },
+   {
+    "var": "dgram",
+    "module": "dgram"
+   },
+   {
+    "var": "os",
+    "module": "os"
+   }
+  ],
+  "x": 570,
+  "y": 100,
+  "wires": [
+   [
+    "20183c7d5d160b39"
+   ]
+  ]
+ },
+ {
+  "id": "20183c7d5d160b39",
+  "type": "debug",
+  "z": "7c6017d4bc66a665",
+  "name": "ผลตรวจ FINS",
+  "active": true,
+  "tosidebar": true,
+  "console": false,
+  "tostatus": false,
+  "complete": "payload",
+  "targetType": "msg",
+  "x": 770,
+  "y": 100,
+  "wires": []
+ }
+]

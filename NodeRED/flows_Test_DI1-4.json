@@ -1,0 +1,113 @@
+[
+ {
+  "id": "4aeb35fb2183debc",
+  "type": "tab",
+  "label": "ทดสอบ DI1–DI4",
+  "disabled": false,
+  "info": "จั๊มสายทดสอบ DI ก่อนต่อ Relay จริง"
+ },
+ {
+  "id": "5b823126f02df54d",
+  "type": "comment",
+  "z": "4aeb35fb2183debc",
+  "name": "จั๊มสาย DI1/DI2/DI3 ทีละช่อง → ดูสถานะใต้โหนด 'แสดง DI' เปลี่ยนเป็น ●",
+  "info": "",
+  "x": 330,
+  "y": 40,
+  "wires": []
+ },
+ {
+  "id": "7ca66d81ab140d11",
+  "type": "inject",
+  "z": "4aeb35fb2183debc",
+  "name": "อ่านทุก 0.5 วิ",
+  "props": [
+   {
+    "p": "payload"
+   }
+  ],
+  "repeat": "0.5",
+  "crontab": "",
+  "once": true,
+  "onceDelay": "2",
+  "topic": "",
+  "payload": "",
+  "payloadType": "date",
+  "x": 140,
+  "y": 100,
+  "wires": [
+   [
+    "647285b377566521"
+   ]
+  ]
+ },
+ {
+  "id": "647285b377566521",
+  "type": "digital-input-all",
+  "z": "4aeb35fb2183debc",
+  "name": "DI1–DI4",
+  "pollInterval": 0,
+  "x": 320,
+  "y": 100,
+  "wires": [
+   [
+    "cba3e6804fe96f7c",
+    "6663e555e346cdce"
+   ]
+  ]
+ },
+ {
+  "id": "6663e555e346cdce",
+  "type": "debug",
+  "z": "4aeb35fb2183debc",
+  "name": "ค่า DI ดิบ",
+  "active": false,
+  "tosidebar": true,
+  "console": false,
+  "tostatus": false,
+  "complete": "true",
+  "targetType": "full",
+  "statusVal": "",
+  "statusType": "auto",
+  "x": 330,
+  "y": 160,
+  "wires": []
+ },
+ {
+  "id": "cba3e6804fe96f7c",
+  "type": "function",
+  "z": "4aeb35fb2183debc",
+  "name": "แสดง DI",
+  "func": "// @ts-nocheck\n// ===== ทดสอบอ่าน DI1–DI4 (ยังไม่ต้องมี Relay ใช้สายไฟจั๊มเอา) =====\n// สถานะใต้โหนดแสดง DI1–DI4 สด ● = ติด ○ = ดับ · ส่งออก debug เฉพาะตอนค่าเปลี่ยน\nfunction truthy(v) {\n    if (v === null || v === undefined) return null;\n    if (typeof v === \"boolean\") return v;\n    if (typeof v === \"number\") return v !== 0;\n    const s = String(v).trim().toLowerCase();\n    if ([\"1\", \"true\", \"on\", \"high\"].includes(s)) return true;\n    if ([\"0\", \"false\", \"off\", \"low\"].includes(s)) return false;\n    return null;\n}\nfunction pick(m, n) {\n    const p = m.payload; let v;\n    if (Array.isArray(p)) v = p[n - 1];\n    else if (p && typeof p === \"object\") {\n        for (const k of [\"DI\" + n, \"di\" + n, \"Di\" + n, \"DI_\" + n, \"di_\" + n, \"input\" + n, \"IN\" + n, String(n)])\n            if (p[k] !== undefined) { v = p[k]; break; }\n        if (v && typeof v === \"object\") v = v.value ?? v.state ?? v.status;\n    }\n    else if (typeof p === \"number\" && Number.isInteger(p)) v = (p >> (n - 1)) & 1;\n    if (v === undefined && m[\"DI\" + n] !== undefined) v = m[\"DI\" + n];\n    return truthy(v);\n}\nconst vals = [1, 2, 3, 4].map(n => pick(msg, n));\nif (vals.every(v => v === null)) {\n    node.status({ fill: \"red\", shape: \"ring\", text: \"อ่านรูปแบบค่าไม่ออก – เปิด debug 'ค่า DI ดิบ' แล้วส่งให้ดู\" });\n    return null;\n}\nconst sym = v => v === null ? \"?\" : v ? \"●\" : \"○\";\nconst txt = vals.map((v, k) => \"DI\" + (k + 1) + sym(v)).join(\"  \");\nnode.status({ fill: vals.some(v => v) ? \"green\" : \"grey\", shape: \"dot\", text: txt });\nconst key = vals.join(\",\");\nif (context.get(\"last\") === key) return null;      // ส่งเฉพาะตอนเปลี่ยน\ncontext.set(\"last\", key);\nmsg.payload = { time: new Date().toLocaleTimeString(\"th-TH\"), DI1: vals[0], DI2: vals[1], DI3: vals[2], DI4: vals[3], text: txt };\nreturn msg;\n",
+  "outputs": 1,
+  "timeout": 0,
+  "noerr": 0,
+  "initialize": "",
+  "finalize": "",
+  "libs": [],
+  "x": 510,
+  "y": 100,
+  "wires": [
+   [
+    "e213810da30caae3"
+   ]
+  ]
+ },
+ {
+  "id": "e213810da30caae3",
+  "type": "debug",
+  "z": "4aeb35fb2183debc",
+  "name": "DI เปลี่ยน",
+  "active": true,
+  "tosidebar": true,
+  "console": false,
+  "tostatus": false,
+  "complete": "payload.text",
+  "targetType": "msg",
+  "statusVal": "",
+  "statusType": "auto",
+  "x": 690,
+  "y": 100,
+  "wires": []
+ }
+]

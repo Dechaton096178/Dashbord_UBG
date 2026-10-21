@@ -1,0 +1,487 @@
+[
+ {
+  "id": "d05c3eb2b55f50ba",
+  "type": "tab",
+  "label": "Tower Light (DO1 เขียว / DO2 แดง)",
+  "disabled": false,
+  "info": "คุมไฟ Tower ผ่าน DO ของกล่อง IoT (node-red-contrib-epg-004b-io)\nDO1 -> Relay1 -> ไฟเขียว | DO2 -> Relay2 -> ไฟแดง"
+ },
+ {
+  "id": "5655f4cb0ce9ad3f",
+  "type": "comment",
+  "z": "d05c3eb2b55f50ba",
+  "name": "① ทดสอบด้วยมือ: กดปุ่มทีละอัน ดูไฟ LED บน Relay (ยังไม่ต้องต่อ 220V)",
+  "info": "",
+  "x": 360,
+  "y": 40,
+  "wires": []
+ },
+ {
+  "id": "0e84415f8388cb3d",
+  "type": "inject",
+  "z": "d05c3eb2b55f50ba",
+  "name": "ไฟเขียว ON",
+  "props": [
+   {
+    "p": "payload"
+   }
+  ],
+  "repeat": "",
+  "crontab": "",
+  "once": false,
+  "onceDelay": "1",
+  "topic": "",
+  "payload": "green",
+  "payloadType": "str",
+  "x": 140,
+  "y": 90,
+  "wires": [
+   [
+    "6344501f196afb37"
+   ]
+  ]
+ },
+ {
+  "id": "b6c8740ac549b62a",
+  "type": "inject",
+  "z": "d05c3eb2b55f50ba",
+  "name": "ไฟแดง ON",
+  "props": [
+   {
+    "p": "payload"
+   }
+  ],
+  "repeat": "",
+  "crontab": "",
+  "once": false,
+  "onceDelay": "1",
+  "topic": "",
+  "payload": "red",
+  "payloadType": "str",
+  "x": 140,
+  "y": 130,
+  "wires": [
+   [
+    "6344501f196afb37"
+   ]
+  ]
+ },
+ {
+  "id": "18f88d6055e809c2",
+  "type": "inject",
+  "z": "d05c3eb2b55f50ba",
+  "name": "ดับไฟ",
+  "props": [
+   {
+    "p": "payload"
+   }
+  ],
+  "repeat": "",
+  "crontab": "",
+  "once": false,
+  "onceDelay": "1",
+  "topic": "",
+  "payload": "off",
+  "payloadType": "str",
+  "x": 130,
+  "y": 170,
+  "wires": [
+   [
+    "6344501f196afb37"
+   ]
+  ]
+ },
+ {
+  "id": "8cc8b8c588d913af",
+  "type": "inject",
+  "z": "d05c3eb2b55f50ba",
+  "name": "ดับไฟตอนเริ่ม",
+  "props": [
+   {
+    "p": "payload"
+   }
+  ],
+  "repeat": "",
+  "crontab": "",
+  "once": true,
+  "onceDelay": "1",
+  "topic": "",
+  "payload": "off",
+  "payloadType": "str",
+  "x": 150,
+  "y": 210,
+  "wires": [
+   [
+    "6344501f196afb37"
+   ]
+  ]
+ },
+ {
+  "id": "6344501f196afb37",
+  "type": "function",
+  "z": "d05c3eb2b55f50ba",
+  "name": "คุมไฟ (กันติดพร้อมกัน)",
+  "func": "// @ts-nocheck\n// ===== คุมไฟ Tower: DO1 = เขียว, DO2 = แดง =====\n// msg.payload: \"green\" | \"red\" | \"off\"  (หรือ true/false สำหรับทดสอบ)\n// กันไฟติดพร้อมกัน: ปิดดวงหนึ่งก่อน แล้วค่อยเปิดอีกดวง\nconst c = String(msg.payload).toLowerCase();\nconst OFF = { payload: false }, ON = { payload: true };\nif (c === \"green\") {\n    node.send([null, OFF]);            // ปิดแดงก่อน\n    node.send([ON, null]);             // เปิดเขียว\n} else if (c === \"red\") {\n    node.send([OFF, null]);            // ปิดเขียวก่อน\n    node.send([null, ON]);             // เปิดแดง\n} else {\n    node.send([OFF, OFF]);             // ดับทั้งคู่\n}\nnode.status({ fill: c === \"green\" ? \"green\" : c === \"red\" ? \"red\" : \"grey\", shape: \"dot\", text: c === \"green\" || c === \"red\" ? c.toUpperCase() : \"OFF\" });\nreturn null;",
+  "outputs": 2,
+  "timeout": 0,
+  "noerr": 0,
+  "initialize": "",
+  "finalize": "",
+  "libs": [],
+  "x": 400,
+  "y": 150,
+  "wires": [
+   [
+    "03858fd58e53fbce"
+   ],
+   [
+    "d34860f3c040ad6f"
+   ]
+  ]
+ },
+ {
+  "id": "03858fd58e53fbce",
+  "type": "digital-output",
+  "z": "d05c3eb2b55f50ba",
+  "name": "DO1 ไฟเขียว",
+  "channel": "DO1",
+  "x": 640,
+  "y": 130,
+  "wires": [
+   [
+    "58b83fc407ada5ad"
+   ]
+  ]
+ },
+ {
+  "id": "d34860f3c040ad6f",
+  "type": "digital-output",
+  "z": "d05c3eb2b55f50ba",
+  "name": "DO2 ไฟแดง",
+  "channel": "DO2",
+  "x": 640,
+  "y": 170,
+  "wires": [
+   [
+    "58b83fc407ada5ad"
+   ]
+  ]
+ },
+ {
+  "id": "58b83fc407ada5ad",
+  "type": "debug",
+  "z": "d05c3eb2b55f50ba",
+  "name": "DO result",
+  "active": true,
+  "tosidebar": true,
+  "console": false,
+  "tostatus": false,
+  "complete": "payload",
+  "targetType": "msg",
+  "x": 840,
+  "y": 150,
+  "wires": []
+ },
+ {
+  "id": "29e1a17708316378",
+  "type": "comment",
+  "z": "d05c3eb2b55f50ba",
+  "name": "② อัตโนมัติจากผลชั่ง: 40–41 g = เขียว · น้อยกว่า 40 หรือเกิน 41 = แดง · ยกออก (≤1 g) = ดับ · ไม่มีข้อมูล 10 วิ = ดับ",
+  "info": "",
+  "x": 440,
+  "y": 270,
+  "wires": []
+ },
+ {
+  "id": "41b575fc106d46ef",
+  "type": "link in",
+  "z": "d05c3eb2b55f50ba",
+  "name": "weight → light",
+  "links": [
+   "4dbc537fe4ac7f5e"
+  ],
+  "x": 115,
+  "y": 330,
+  "wires": [
+   [
+    "5b303c2ec52cfd22",
+    "a3621aab193a0ce6"
+   ]
+  ]
+ },
+ {
+  "id": "e1c4552504025b5e",
+  "type": "inject",
+  "z": "d05c3eb2b55f50ba",
+  "name": "ทดสอบ 40.5 g (OK เขียว)",
+  "props": [
+   {
+    "p": "payload"
+   }
+  ],
+  "repeat": "",
+  "crontab": "",
+  "once": false,
+  "onceDelay": "1",
+  "topic": "",
+  "payload": "{\"weight\":40.5,\"unit\":\"g\",\"stable\":true}",
+  "payloadType": "json",
+  "x": 160,
+  "y": 380,
+  "wires": [
+   [
+    "5b303c2ec52cfd22"
+   ]
+  ]
+ },
+ {
+  "id": "c6de7ef9fc99485e",
+  "type": "inject",
+  "z": "d05c3eb2b55f50ba",
+  "name": "ทดสอบ 41.6 g (เกิน แดง)",
+  "props": [
+   {
+    "p": "payload"
+   }
+  ],
+  "repeat": "",
+  "crontab": "",
+  "once": false,
+  "onceDelay": "1",
+  "topic": "",
+  "payload": "{\"weight\":41.6,\"unit\":\"g\",\"stable\":true}",
+  "payloadType": "json",
+  "x": 160,
+  "y": 420,
+  "wires": [
+   [
+    "5b303c2ec52cfd22"
+   ]
+  ]
+ },
+ {
+  "id": "78bc1c3b340236dd",
+  "type": "inject",
+  "z": "d05c3eb2b55f50ba",
+  "name": "ทดสอบ ยกออก 0 g",
+  "props": [
+   {
+    "p": "payload"
+   }
+  ],
+  "repeat": "",
+  "crontab": "",
+  "once": false,
+  "onceDelay": "1",
+  "topic": "",
+  "payload": "{\"weight\":0,\"unit\":\"g\",\"stable\":true}",
+  "payloadType": "json",
+  "x": 150,
+  "y": 540,
+  "wires": [
+   [
+    "5b303c2ec52cfd22"
+   ]
+  ]
+ },
+ {
+  "id": "5b303c2ec52cfd22",
+  "type": "function",
+  "z": "d05c3eb2b55f50ba",
+  "name": "ตัดสิน OK / NG",
+  "func": "// @ts-nocheck\n// ===== ตัดสินผลชั่ง -> สีไฟ Tower =====\n// รับ msg.payload = { weight, unit, stable } จาก flow Extruder03 (ผ่าน link) หรือจากปุ่มทดสอบ\n// ส่งออกเฉพาะเมื่อสีเปลี่ยน: \"green\" | \"red\" | \"off\"\nconst MIN_G = 40.0;      // Spec ต่ำสุด (กรัม)  *** ภายหลังจะดึงจากตาราง Spec ตามรุ่นของ Batch ***\nconst MAX_G = 41.0;      // Spec สูงสุด (กรัม)\nconst EMPTY_G = 1.0;     // ไม่เกินค่านี้ = ไม่มีของบนเครื่องชั่ง -> ดับไฟ\n\nconst p = msg.payload || {};\nif (p.weight === null || p.weight === undefined || isNaN(p.weight)) return null;\nconst g = String(p.unit || \"g\").toLowerCase() === \"kg\" ? p.weight * 1000 : p.weight;\n\nlet color;\nif (g <= EMPTY_G) color = \"off\";\nelse if (!p.stable) return null;                       // ยังไม่นิ่ง -> คงสีเดิมไว้\nelse color = (g >= MIN_G && g <= MAX_G) ? \"green\" : \"red\";\n\nif (context.get(\"last\") === color) return null;        // สีเดิม ไม่ต้องสั่งซ้ำ\ncontext.set(\"last\", color);\nnode.status({ fill: color === \"off\" ? \"grey\" : color, shape: \"dot\",\n              text: color.toUpperCase() + (color === \"off\" ? \"\" : \"  \" + g + \" g  (\" + MIN_G + \"–\" + MAX_G + \")\") });\nreturn { payload: color, weight: g };",
+  "outputs": 1,
+  "timeout": 0,
+  "noerr": 0,
+  "initialize": "",
+  "finalize": "",
+  "libs": [],
+  "x": 410,
+  "y": 360,
+  "wires": [
+   [
+    "6344501f196afb37"
+   ]
+  ]
+ },
+ {
+  "id": "a3621aab193a0ce6",
+  "type": "trigger",
+  "z": "d05c3eb2b55f50ba",
+  "name": "ไม่มีข้อมูล 10 วิ → ดับ",
+  "op1": "",
+  "op2": "off",
+  "op1type": "nul",
+  "op2type": "str",
+  "duration": "10",
+  "extend": true,
+  "overrideDelay": false,
+  "units": "s",
+  "reset": "",
+  "bytopic": "all",
+  "topic": "topic",
+  "outputs": 1,
+  "x": 430,
+  "y": 420,
+  "wires": [
+   [
+    "e4271570deffca58",
+    "6344501f196afb37"
+   ]
+  ]
+ },
+ {
+  "id": "e4271570deffca58",
+  "type": "change",
+  "z": "d05c3eb2b55f50ba",
+  "name": "รีเซ็ตสีล่าสุด",
+  "rules": [
+   {
+    "t": "set",
+    "p": "payload",
+    "pt": "msg",
+    "to": "{\"weight\":0,\"unit\":\"g\",\"stable\":true}",
+    "tot": "json"
+   }
+  ],
+  "x": 640,
+  "y": 420,
+  "wires": [
+   [
+    "5b303c2ec52cfd22"
+   ]
+  ]
+ },
+ {
+  "id": "78b7b2ace67316d6",
+  "type": "comment",
+  "z": "d05c3eb2b55f50ba",
+  "name": "③ อ่าน DI / AI (ทดสอบเซ็นเซอร์ระดับ) — กดแล้วดู Debug",
+  "info": "",
+  "x": 330,
+  "y": 530,
+  "wires": []
+ },
+ {
+  "id": "fe731e3bd93c7a77",
+  "type": "inject",
+  "z": "d05c3eb2b55f50ba",
+  "name": "อ่าน DI ทั้งหมด",
+  "props": [
+   {
+    "p": "payload"
+   }
+  ],
+  "repeat": "",
+  "crontab": "",
+  "once": false,
+  "onceDelay": "1",
+  "topic": "",
+  "payload": "",
+  "payloadType": "date",
+  "x": 140,
+  "y": 580,
+  "wires": [
+   [
+    "07570c1d1c169dc0"
+   ]
+  ]
+ },
+ {
+  "id": "07570c1d1c169dc0",
+  "type": "digital-input-all",
+  "z": "d05c3eb2b55f50ba",
+  "name": "DI1–DI4",
+  "pollInterval": 0,
+  "x": 360,
+  "y": 580,
+  "wires": [
+   [
+    "548ea896bfbe621b"
+   ]
+  ]
+ },
+ {
+  "id": "0b38e7cd31b31268",
+  "type": "inject",
+  "z": "d05c3eb2b55f50ba",
+  "name": "อ่าน AI1/AI2",
+  "props": [
+   {
+    "p": "payload"
+   }
+  ],
+  "repeat": "",
+  "crontab": "",
+  "once": false,
+  "onceDelay": "1",
+  "topic": "",
+  "payload": "",
+  "payloadType": "date",
+  "x": 140,
+  "y": 630,
+  "wires": [
+   [
+    "aa5aa9a122edbe14"
+   ]
+  ]
+ },
+ {
+  "id": "aa5aa9a122edbe14",
+  "type": "analog-input",
+  "z": "d05c3eb2b55f50ba",
+  "name": "AI1/AI2",
+  "serialPath": "/dev/ttyS3",
+  "ai1Type": "voltage",
+  "ai2Type": "voltage",
+  "command": "read",
+  "interval": 100,
+  "x": 360,
+  "y": 630,
+  "wires": [
+   [
+    "548ea896bfbe621b"
+   ]
+  ]
+ },
+ {
+  "id": "548ea896bfbe621b",
+  "type": "debug",
+  "z": "d05c3eb2b55f50ba",
+  "name": "DI / AI",
+  "active": true,
+  "tosidebar": true,
+  "console": false,
+  "tostatus": false,
+  "complete": "payload",
+  "targetType": "msg",
+  "x": 560,
+  "y": 605,
+  "wires": []
+ },
+ {
+  "id": "0957c3fc3cc98405",
+  "type": "inject",
+  "z": "d05c3eb2b55f50ba",
+  "name": "ทดสอบ 39.4 g (น้อย แดง)",
+  "props": [
+   {
+    "p": "payload"
+   }
+  ],
+  "repeat": "",
+  "crontab": "",
+  "once": false,
+  "onceDelay": "1",
+  "topic": "",
+  "payload": "{\"weight\":39.4,\"unit\":\"g\",\"stable\":true}",
+  "payloadType": "json",
+  "x": 160,
+  "y": 500,
+  "wires": [
+   [
+    "5b303c2ec52cfd22"
+   ]
+  ]
+ }
+]

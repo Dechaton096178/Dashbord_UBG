@@ -1,0 +1,87 @@
+[
+  {
+    "id": "03821e88046e4e4b",
+    "type": "tab",
+    "label": "สแกน port PLC SB03",
+    "disabled": false,
+    "env": [],
+    "info": "หา port ที่เปิดอยู่บน PLC 192.168.0.101 (แก้ HOST ในโค้ดเพื่อสแกนเครื่องอื่น)"
+  },
+  {
+    "id": "7132f24e066ce8a7",
+    "type": "comment",
+    "z": "03821e88046e4e4b",
+    "name": "กดปุ่ม แล้วรอ 1-3 นาที ดูผลใต้ node และในแท็บ Debug",
+    "info": "",
+    "x": 260,
+    "y": 40,
+    "wires": []
+  },
+  {
+    "id": "ab4f27f3bbf662f8",
+    "type": "inject",
+    "z": "03821e88046e4e4b",
+    "name": "สแกน port 192.168.0.101",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 170,
+    "y": 100,
+    "wires": [
+      [
+        "797b0e37e6ac3e70"
+      ]
+    ]
+  },
+  {
+    "id": "797b0e37e6ac3e70",
+    "type": "function",
+    "z": "03821e88046e4e4b",
+    "name": "สแกน port",
+    "func": "// สแกนหา port TCP ที่เปิดอยู่บน PLC (ใช้เวลาประมาณ 1-3 นาที)\nconst HOST = \"192.168.0.101\";\nconst FROM = 1, TO = 20000;           // ช่วง port ที่สแกน\nconst EXTRA = [44818, 48898, 61440];  // port อื่นที่พบบ่อยในโรงงาน\nconst PAR = 200, TMO = 700;\n\nconst ports = [];\nfor (let p = FROM; p <= TO; p++) ports.push(p);\nEXTRA.forEach(p => { if (p > TO) ports.push(p); });\n\nconst open = [], refused = [];\nlet timeout = 0, idx = 0, done = 0;\nconst t0 = Date.now();\nnode.status({ fill: \"blue\", shape: \"ring\", text: \"เริ่มสแกน \" + HOST });\n\nfunction probe(port) {\n    return new Promise(res => {\n        const s = new net.Socket(); let fin = false;\n        const end = r => { if (fin) return; fin = true; s.destroy(); res(r); };\n        s.setTimeout(TMO);\n        s.once(\"connect\", () => end(\"open\"));\n        s.once(\"timeout\", () => end(\"timeout\"));\n        s.once(\"error\", e => end(e.code === \"ECONNREFUSED\" ? \"refused\" : \"timeout\"));\n        s.connect(port, HOST);\n    });\n}\nasync function worker() {\n    while (idx < ports.length) {\n        const p = ports[idx++];\n        const r = await probe(p);\n        if (r === \"open\") open.push(p); else if (r === \"refused\") refused.push(p); else timeout++;\n        if (++done % 500 === 0) node.status({ fill: \"blue\", shape: \"ring\", text: done + \"/\" + ports.length + \" | open: \" + (open.join(\",\") || \"-\") });\n    }\n}\n(async () => {\n    await Promise.all(Array.from({ length: PAR }, worker));\n    open.sort((a, b) => a - b);\n    const sec = Math.round((Date.now() - t0) / 1000);\n    node.status({ fill: open.length ? \"green\" : \"red\", shape: \"dot\", text: \"OPEN: \" + (open.join(\", \") || \"ไม่มี\") + \" (\" + sec + \"s)\" });\n    node.send({ topic: \"Port scan \" + HOST, payload: {\n        host: HOST, range: FROM + \"-\" + TO, open: open,\n        refused: refused.length, noReply: timeout, seconds: sec,\n        hint: open.length ? \"ส่งรายการ open ให้ตรวจว่าเป็น SLMP/Modbus หรือไม่\"\n            : (refused.length ? \"PLC ตอบปฏิเสธ (RST) แต่ไม่มี port ที่เปิด -> ยังไม่ได้ตั้ง SLMP/Modbus ใน GX Works3\"\n                              : \"PLC ไม่ตอบทุก port (ทิ้งแพ็กเก็ตเงียบ) -> ยังไม่ได้ตั้ง SLMP/Modbus ใน GX Works3 หรือมี firewall\")\n    }});\n})();\nreturn null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "net",
+        "module": "net"
+      }
+    ],
+    "x": 380,
+    "y": 100,
+    "wires": [
+      [
+        "4ef4adbc1250c6cf"
+      ]
+    ]
+  },
+  {
+    "id": "4ef4adbc1250c6cf",
+    "type": "debug",
+    "z": "03821e88046e4e4b",
+    "name": "ผลสแกน port",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 570,
+    "y": 100,
+    "wires": []
+  }
+]

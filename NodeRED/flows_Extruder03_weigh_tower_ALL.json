@@ -1,0 +1,835 @@
+[
+  {
+    "id": "789bda55589a8d14",
+    "type": "tab",
+    "label": "Extruder03 ชั่งน้ำหนัก + ไฟ Tower (Spec ตามรุ่น)",
+    "disabled": false,
+    "info": "อ่านน้ำหนักจาก PLC Omron (FINS) -> ตัดสิน 40–41 g -> DO1 เขียว / DO2 แดง -> ส่ง WeightLog เมื่อชั่งเสร็จ"
+  },
+  {
+    "id": "00a0f5897dd1ce88",
+    "type": "comment",
+    "z": "789bda55589a8d14",
+    "name": "Deploy → Debug 'น้ำหนัก' / เปิด debug 'dump' เพื่อดูว่าตัวเลขอยู่ D ไหน",
+    "info": "",
+    "x": 330,
+    "y": 40,
+    "wires": []
+  },
+  {
+    "id": "356088f5bbd2d256",
+    "type": "inject",
+    "z": "789bda55589a8d14",
+    "name": "ทุก 0.5 วินาที",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "0.5",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "2",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 140,
+    "y": 100,
+    "wires": [
+      [
+        "2bf3c21f5c4699f2"
+      ]
+    ]
+  },
+  {
+    "id": "2bf3c21f5c4699f2",
+    "type": "function",
+    "z": "789bda55589a8d14",
+    "name": "อ่านน้ำหนัก D550 (FINS UDP)",
+    "func": "// @ts-nocheck\n// ===== Extruder03 : อ่านน้ำหนักจาก PLC Omron NJ 192.168.250.1 ด้วย FINS UDP (ทดสอบแล้วว่า SA1=2 ใช้ได้) =====\n// ค่าที่เจอ D554=12336 (0x3030 = \"00\"), D555=11824 (0x2E30 = \".0\") → PLC เก็บน้ำหนักเป็น \"ตัวอักษร ASCII\" จากเครื่องชั่ง\n// จึงอ่านช่วง D540–D579 มาทั้งก้อน แล้วถอดเป็นข้อความ หาเลขน้ำหนักในนั้น\n// NJ เก็บ STRING แบบ byte ต่ำก่อน -> ต้องสลับ byte ในแต่ละ word (\"TS+,\" -> \"ST,+\")\n// รูปแบบเครื่องชั่ง: \"ST,+0000.000 g\"  ST=นิ่ง US=ยังไม่นิ่ง OL=เกินพิกัด\nconst HOST = \"192.168.250.1\", DA1 = 1, SA1 = 50;   // SA1 = เลขท้าย IP กล่อง (eth0 192.168.250.50)\nconst START = 550, COUNT = 8;           // อ่านแค่ D550–D557 (\"ST,+0000.000 g\") ให้ PLC ทำงานน้อยที่สุด\nconst W_FROM = 550, W_TO = 557;         // ช่วงที่ใช้หาเลขน้ำหนัก (word)\nconst SWAP = true;                      // สลับ byte (NJ = true)\nconst RETRY = 0;                        // ลองซ้ำเมื่อ timeout (สายมี packet หาย)\nconst ERR_AFTER = 20;                   // timeout ติดกันกี่ครั้งถึงแจ้ง error\n\nfunction wordStr(w) { let a = (w >> 8) & 0xFF, b = w & 0xFF; if (SWAP) { const t = a; a = b; b = t; } return [a, b].map(c => c >= 32 && c < 127 ? String.fromCharCode(c) : \"·\").join(\"\"); }\n\n// ---- ใช้ socket เดียวค้างไว้ (ไม่เปิด-ปิดทุกรอบ) -> PLC/HMI ไม่ต้องรับภาระเพิ่ม ----\nlet S = context.get(\"S\");\nif (!S) {\n    const sock = dgram.createSocket(\"udp4\");\n    S = { sock, pending: null };\n    sock.on(\"error\", e => { if (S.pending) S.pending(\"socket \" + e.code); });\n    sock.on(\"message\", r => { if (S.pending && r.length >= 14 && r[9] === S.sid) S.pending(null, r); });\n    sock.bind(0);\n    context.set(\"S\", S);\n}\nif (S.pending) return null;                       // รอบก่อนยังไม่ตอบ -> ข้ามรอบนี้ (ไม่ยิงซ้อน)\nconst sid = ((S.sid || 0) + 1) & 0xFF; S.sid = sid;\n// ทุก 4 รอบ (≈2 วินาที) อ่าน PRODUCTION NAME ที่ D210 (พนักงานพิมพ์เลขรุ่น 1–8 บนจอ HMI)\nconst cyc = ((context.get(\"cyc\") || 0) + 1) % 4; context.set(\"cyc\", cyc);\nconst NAME_D = 210, NAME_W = 5;\nconst isName = cyc === 0;\nconst RS = isName ? NAME_D : START, RC = isName ? NAME_W : COUNT;\nconst req = Buffer.from([0x80, 0, 0x02, 0, DA1, 0, 0, SA1, 0, sid,\n    0x01, 0x01, 0x82, (RS >> 8) & 0xFF, RS & 0xFF, 0, (RC >> 8) & 0xFF, RC & 0xFF]);\nconst timer = setTimeout(() => S.pending && S.pending(\"timeout\"), 400);\nS.pending = (err, r) => {\n    clearTimeout(timer); S.pending = null;\n    if (err) {\n        const n = (context.get(\"fail\") || 0) + 1; context.set(\"fail\", n);\n        if (n >= ERR_AFTER) node.status({ fill: \"red\", shape: \"ring\", text: err + \" ติดกัน \" + n + \" ครั้ง\" });\n        if (n === ERR_AFTER || (n > ERR_AFTER && n % 120 === 0)) node.send([null, null, { payload: { error: err + \" ติดกัน \" + n + \" ครั้ง (เช็คสาย LAN / PLC)\" } }]);\n        return;\n    }\n    context.set(\"fail\", 0);\n    const ec = r.readUInt16BE(12);\n    if (ec !== 0 && ec !== 0x0040) { node.status({ fill: \"red\", shape: \"dot\", text: \"end code 0x\" + ec.toString(16) }); node.send([null, null, { payload: { error: \"PLC end code 0x\" + ec.toString(16) } }]); return; }\n    if (isName) {\n        let nm = \"\"; for (let k = 0; k < NAME_W; k++) nm += wordStr(r.readUInt16BE(14 + k * 2));\n        nm = nm.replace(/·/g, \" \").trim();\n        const words = []; for (let k = 0; k < NAME_W; k++) words.push(r.readUInt16BE(14 + k * 2));\n        flow.set(\"ex03_model_words\", words);          // เก็บค่าดิบไว้ด้วย (กรณี HMI เก็บเป็นตัวเลข ไม่ใช่ข้อความ)\n        const key = nm + \"|\" + words.join(\",\");\n        if (context.get(\"nameKey\") !== key) {\n            context.set(\"nameKey\", key);\n            flow.set(\"ex03_model_raw\", nm);\n            node.send([null, { payload: { \"PRODUCTION NAME (D210)\": nm, words: words.map((v, i) => \"D\" + (NAME_D + i) + \"=\" + v + \" (0x\" + v.toString(16).padStart(4, \"0\") + \")\") } }, null]);\n        }\n        return;\n    }\n    const w = []; for (let k = 0; k < COUNT; k++) w.push(r.readUInt16BE(14 + k * 2));\n    const at = d => w[d - START];\n    // ข้อความ ASCII ของช่วงน้ำหนัก\n    let txt = \"\"; for (let d = W_FROM; d <= W_TO; d++) txt += wordStr(at(d));\n    txt = txt.replace(/·/g, \" \").replace(/\\s+/g, \" \").trim();\n    // \"ST,+0000.000 g\" -> สถานะ, เครื่องหมาย, ตัวเลข, หน่วย (เอาชุดแรก)\n    const mm = txt.match(/([A-Z]{2})?\\s*,?\\s*([+-])?\\s*(\\d+(?:\\.\\d+)?)\\s*([a-z]{1,3})?/);\n    const weight = mm ? parseFloat((mm[2] === \"-\" ? \"-\" : \"\") + mm[3]) : null;\n    const UNIT = (mm && mm[4]) || \"\";\n    const stat = mm && mm[1] ? ({ ST: \"นิ่ง\", US: \"ยังไม่นิ่ง\", OL: \"เกินพิกัด\", QT: \"นับชิ้น\" }[mm[1]] || mm[1]) : \"\";\n    flow.set(\"ex03_weight\", { weight, unit: UNIT, stable: mm && mm[1] === \"ST\", text: txt, ts: Date.now() });\n    node.status({ fill: weight === null ? \"yellow\" : mm[1] === \"ST\" ? \"green\" : \"yellow\", shape: \"dot\", text: (weight === null ? \"ไม่พบตัวเลข\" : weight + \" \" + UNIT + (stat ? \" · \" + stat : \"\")) });\n    const dump = {};\n    for (let d = START; d < START + COUNT; d++) { const v = at(d); dump[\"D\" + d] = v + \" | 0x\" + v.toString(16).padStart(4, \"0\") + \" | \\\"\" + wordStr(v) + \"\\\"\"; }\n    let all = \"\"; for (let d = START; d < START + COUNT; d++) all += wordStr(at(d));\n    node.send([\n        { payload: { machine: \"Extruder03\", weight, unit: UNIT, stable: !!(mm && mm[1] === \"ST\"), สถานะ: stat, ข้อความจากเครื่องชั่ง: txt, time: new Date().toLocaleTimeString(\"th-TH\") } },\n        null,\n        null\n    ]);\n};\nS.sock.send(req, 9600, HOST, e => { if (e && S.pending) S.pending(\"send \" + e.code); });\nreturn null;",
+    "outputs": 3,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "const S = context.get('S'); if (S) { try { S.sock.close(); } catch (e) {} } context.set('S', null);",
+    "libs": [
+      {
+        "var": "dgram",
+        "module": "dgram"
+      }
+    ],
+    "x": 380,
+    "y": 100,
+    "wires": [
+      [
+        "c6444a7a7d7978ba",
+        "03e75dc93c407bfd",
+        "8aba04549d84b2c8",
+        "b217e3d6a827eacd",
+        "11fe0000000c0002"
+      ],
+      [
+        "f9f4ed4cdeb2d4fd"
+      ],
+      [
+        "c125b0ebc0bd0c0c"
+      ]
+    ]
+  },
+  {
+    "id": "c6444a7a7d7978ba",
+    "type": "debug",
+    "z": "789bda55589a8d14",
+    "name": "น้ำหนัก",
+    "active": false,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "x": 640,
+    "y": 60,
+    "wires": []
+  },
+  {
+    "id": "f9f4ed4cdeb2d4fd",
+    "type": "debug",
+    "z": "789bda55589a8d14",
+    "name": "รุ่นที่เลือก (D210)",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "x": 700,
+    "y": 100,
+    "wires": []
+  },
+  {
+    "id": "c125b0ebc0bd0c0c",
+    "type": "debug",
+    "z": "789bda55589a8d14",
+    "name": "error",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "x": 630,
+    "y": 140,
+    "wires": []
+  },
+  {
+    "id": "511b1bb1a451396b",
+    "type": "comment",
+    "z": "789bda55589a8d14",
+    "name": "ส่งขึ้น Server เฉพาะตอนชั่งเสร็จ (น้ำหนัก > 1.0 g + นิ่ง) → WeightLog.aspx",
+    "info": "",
+    "x": 360,
+    "y": 220,
+    "wires": []
+  },
+  {
+    "id": "03e75dc93c407bfd",
+    "type": "function",
+    "z": "789bda55589a8d14",
+    "name": "ส่งเมื่อชั่งเสร็จ (>1.0 g)",
+    "func": "// @ts-nocheck\n// ===== ส่งน้ำหนักขึ้น Server เฉพาะ \"ชั่งเสร็จ 1 ครั้ง\" =====\n// - น้ำหนัก ไม่เกิน 1.0 g : ไม่ส่ง (รอวางของ / ค่าแกว่ง)\n// - วางของแล้ว + นิ่ง (ST) + ค่าเดิมติดกัน NEED_SAME รอบ -> ส่ง 1 ครั้ง\n// - ยังวางค้างอยู่ -> ไม่ส่งซ้ำ จนกว่าจะยกออก (กลับเป็น 0) แล้ววางชิ้นใหม่\n// - ส่งไม่สำเร็จ -> เก็บคิวไว้ ส่งใหม่รอบถัดไป (ไม่หาย)\nconst MACHINE     = \"Extruder03\";\nconst MIN_G       = 1.0;   // ส่งเมื่อน้ำหนัก > 1.0 g เท่านั้น (หน่วย kg จะแปลงเป็นกรัมก่อนเทียบ)\nconst NEED_SAME   = 2;     // ค่าเดิมติดกันกี่รอบถึงนับว่านิ่ง (รอบละ 0.5 วินาที ≈ 1 วินาที)\nconst RESEND_DIFF = 0;     // วางค้างแต่น้ำหนักเปลี่ยนเกินค่านี้ -> ส่งใหม่ (0 = ไม่ส่ง)\n\n// ส่งของที่ค้างในคิวก่อน (ครั้งละ 1)\nconst q = flow.get(\"ex03_queue\") || [];\nif (q.length) { const item = q.shift(); flow.set(\"ex03_queue\", q); node.send({ payload: item, queued: true }); }\n\nconst p = msg.payload || {}, w = p.weight;\nif (w === null || w === undefined || isNaN(w)) return null;\n\nconst grams = String(p.unit || \"\").toLowerCase() === \"kg\" ? w * 1000 : w;\nif (grams <= MIN_G) {\n    context.set(\"armed\", true); context.set(\"same\", 0); context.set(\"last\", null);\n    node.status({ fill: \"grey\", shape: \"ring\", text: \"รอวางของ · ส่งแล้ว \" + (context.get(\"count\") || 0) + \" ครั้ง\" + (q.length ? \" · ค้างคิว \" + q.length : \"\") });\n    return null;\n}\nconst same = context.get(\"last\") === w ? (context.get(\"same\") || 0) + 1 : 1;\ncontext.set(\"same\", same); context.set(\"last\", w);\nif (!p.stable || same < NEED_SAME) { node.status({ fill: \"yellow\", shape: \"ring\", text: \"รอนิ่ง \" + w + \" \" + (p.unit || \"\") }); return null; }\n\nconst armed = context.get(\"armed\") !== false, sentW = context.get(\"sentW\");\nif (armed || (RESEND_DIFF > 0 && sentW != null && Math.abs(w - sentW) >= RESEND_DIFF)) {\n    context.set(\"armed\", false); context.set(\"sentW\", w);\n    const n = (context.get(\"count\") || 0) + 1; context.set(\"count\", n);\n    node.status({ fill: \"green\", shape: \"dot\", text: \"ส่ง \" + w + \" \" + (p.unit || \"\") + \" · ครั้งที่ \" + n });\n    const md = flow.get(\"ex03_model\");\n    return { payload: { machine: MACHINE, weight: w, unit: p.unit || \"\", stable: true, model: md ? md.name : \"\", barcode: md ? (md.barcode || \"\") : \"\", min: md ? md.min : null, max: md ? md.max : null,\n                        result: md ? (w >= md.min && w <= md.max ? \"OK\" : \"NG\") : \"\", text: (md ? (md.barcode ? md.barcode + \" \" : \"\") + md.name + \" | \" : \"\") + (p[\"ข้อความจากเครื่องชั่ง\"] || \"\") } };\n}\nnode.status({ fill: \"blue\", shape: \"dot\", text: \"ส่งแล้ว \" + sentW + \" · รอยกของออก\" });\nreturn null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 380,
+    "y": 270,
+    "wires": [
+      [
+        "1a8f20956d626869"
+      ]
+    ]
+  },
+  {
+    "id": "1a8f20956d626869",
+    "type": "change",
+    "z": "789bda55589a8d14",
+    "name": "จำ body",
+    "rules": [
+      {
+        "t": "set",
+        "p": "sent",
+        "pt": "msg",
+        "to": "payload",
+        "tot": "msg"
+      }
+    ],
+    "x": 570,
+    "y": 270,
+    "wires": [
+      [
+        "8d99b82e2cc971b5"
+      ]
+    ]
+  },
+  {
+    "id": "8d99b82e2cc971b5",
+    "type": "http request",
+    "z": "789bda55589a8d14",
+    "name": "POST WeightLog",
+    "method": "POST",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "http://192.168.100.20/Dashboard/WeightLog.aspx",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 740,
+    "y": 270,
+    "wires": [
+      [
+        "e669a68b56d91fa8"
+      ]
+    ]
+  },
+  {
+    "id": "e669a68b56d91fa8",
+    "type": "function",
+    "z": "789bda55589a8d14",
+    "name": "เช็คผล",
+    "func": "// server ตอบไม่ใช่ 200 -> เข้าคิวเหมือน error\nif (msg.statusCode !== 200) {\n    const q = flow.get(\"ex03_queue\") || [];\n    const body = msg.sent || null;\n    if (body && q.length < 500) { q.push(body); flow.set(\"ex03_queue\", q); }\n    node.status({ fill: \"red\", shape: \"ring\", text: \"HTTP \" + msg.statusCode + \" · ค้างคิว \" + q.length });\n} else node.status({ fill: \"green\", shape: \"dot\", text: \"บันทึกแล้ว \" + new Date().toLocaleTimeString(\"th-TH\") });\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 910,
+    "y": 270,
+    "wires": [
+      [
+        "576e480c58f42a74"
+      ]
+    ]
+  },
+  {
+    "id": "576e480c58f42a74",
+    "type": "debug",
+    "z": "789bda55589a8d14",
+    "name": "server ตอบ",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "x": 1070,
+    "y": 270,
+    "wires": []
+  },
+  {
+    "id": "0c3509577c82b7a0",
+    "type": "catch",
+    "z": "789bda55589a8d14",
+    "name": "ส่งไม่ได้",
+    "scope": [
+      "8d99b82e2cc971b5"
+    ],
+    "uncaught": false,
+    "x": 740,
+    "y": 330,
+    "wires": [
+      [
+        "4b2c22918d28cf2a"
+      ]
+    ]
+  },
+  {
+    "id": "4b2c22918d28cf2a",
+    "type": "function",
+    "z": "789bda55589a8d14",
+    "name": "เก็บเข้าคิว",
+    "func": "// ส่งไม่สำเร็จ -> เก็บเข้าคิว (สูงสุด 500 รายการ) ให้ node ส่งค่าลองใหม่\nconst q = flow.get(\"ex03_queue\") || [];\nif (msg.sent && msg.sent.weight > 0 && q.length < 500) q.push(msg.sent);\nflow.set(\"ex03_queue\", q);\nnode.status({ fill: \"red\", shape: \"ring\", text: \"ส่งไม่ได้ · ค้างคิว \" + q.length });\nreturn { payload: { error: msg.error && msg.error.message, ค้างคิว: q.length } };",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 910,
+    "y": 330,
+    "wires": [
+      [
+        "bb17a1fd3824dd51"
+      ]
+    ]
+  },
+  {
+    "id": "bb17a1fd3824dd51",
+    "type": "debug",
+    "z": "789bda55589a8d14",
+    "name": "ส่งไม่ได้",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "x": 1070,
+    "y": 330,
+    "wires": []
+  },
+  {
+    "id": "a878797c6dc7d5ea",
+    "type": "comment",
+    "z": "789bda55589a8d14",
+    "name": "① ทดสอบด้วยมือ: กดปุ่มทีละอัน ดูไฟ LED บน Relay (ยังไม่ต้องต่อ 220V)",
+    "info": "",
+    "x": 360,
+    "y": 570,
+    "wires": []
+  },
+  {
+    "id": "12c3dd58fd7d7ed7",
+    "type": "inject",
+    "z": "789bda55589a8d14",
+    "name": "ไฟเขียว ON",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": "1",
+    "topic": "",
+    "payload": "green",
+    "payloadType": "str",
+    "x": 140,
+    "y": 620,
+    "wires": [
+      [
+        "71816d8d51767579"
+      ]
+    ]
+  },
+  {
+    "id": "a635d9a09805fd7e",
+    "type": "inject",
+    "z": "789bda55589a8d14",
+    "name": "ไฟแดง ON",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": "1",
+    "topic": "",
+    "payload": "red",
+    "payloadType": "str",
+    "x": 140,
+    "y": 660,
+    "wires": [
+      [
+        "71816d8d51767579"
+      ]
+    ]
+  },
+  {
+    "id": "ad9ddae7c529e02e",
+    "type": "inject",
+    "z": "789bda55589a8d14",
+    "name": "ดับไฟ",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": "1",
+    "topic": "",
+    "payload": "off",
+    "payloadType": "str",
+    "x": 130,
+    "y": 700,
+    "wires": [
+      [
+        "71816d8d51767579"
+      ]
+    ]
+  },
+  {
+    "id": "6400b2fb376132fd",
+    "type": "inject",
+    "z": "789bda55589a8d14",
+    "name": "ดับไฟตอนเริ่ม",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "1",
+    "topic": "",
+    "payload": "off",
+    "payloadType": "str",
+    "x": 150,
+    "y": 740,
+    "wires": [
+      [
+        "71816d8d51767579"
+      ]
+    ]
+  },
+  {
+    "id": "71816d8d51767579",
+    "type": "function",
+    "z": "789bda55589a8d14",
+    "name": "คุมไฟ (กันติดพร้อมกัน)",
+    "func": "// @ts-nocheck\n// ===== คุมไฟ Tower: DO1 = เขียว, DO2 = แดง =====\n// msg.payload: \"green\" | \"red\" | \"off\"  (หรือ true/false สำหรับทดสอบ)\n// กันไฟติดพร้อมกัน: ปิดดวงหนึ่งก่อน แล้วค่อยเปิดอีกดวง\nconst c = String(msg.payload).toLowerCase();\nconst OFF = { payload: false }, ON = { payload: true };\nif (c === \"green\") {\n    node.send([null, OFF]);            // ปิดแดงก่อน\n    node.send([ON, null]);             // เปิดเขียว\n} else if (c === \"red\") {\n    node.send([OFF, null]);            // ปิดเขียวก่อน\n    node.send([null, ON]);             // เปิดแดง\n} else {\n    node.send([OFF, OFF]);             // ดับทั้งคู่\n}\nnode.status({ fill: c === \"green\" ? \"green\" : c === \"red\" ? \"red\" : \"grey\", shape: \"dot\", text: c === \"green\" || c === \"red\" ? c.toUpperCase() : \"OFF\" });\nreturn null;",
+    "outputs": 2,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 400,
+    "y": 680,
+    "wires": [
+      [
+        "c8aa49133ae28e6d"
+      ],
+      [
+        "b578cbe37c7c2458"
+      ]
+    ]
+  },
+  {
+    "id": "c8aa49133ae28e6d",
+    "type": "digital-output",
+    "z": "789bda55589a8d14",
+    "name": "DO1 ไฟเขียว",
+    "channel": "DO1",
+    "x": 640,
+    "y": 660,
+    "wires": [
+      [
+        "366f1d9a3c052c3a"
+      ]
+    ]
+  },
+  {
+    "id": "b578cbe37c7c2458",
+    "type": "digital-output",
+    "z": "789bda55589a8d14",
+    "name": "DO2 ไฟแดง",
+    "channel": "DO2",
+    "x": 640,
+    "y": 700,
+    "wires": [
+      [
+        "366f1d9a3c052c3a"
+      ]
+    ]
+  },
+  {
+    "id": "366f1d9a3c052c3a",
+    "type": "debug",
+    "z": "789bda55589a8d14",
+    "name": "DO result",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "x": 840,
+    "y": 680,
+    "wires": []
+  },
+  {
+    "id": "3dc67be4b185854c",
+    "type": "comment",
+    "z": "789bda55589a8d14",
+    "name": "② Spec ตามรุ่น: ยิงบาร์โค้ดรุ่น (S-Range, C-Practi, …) ลงช่อง PRODUCTION NAME (D210) · ไม่ตรงรุ่นใด = 39–41 g · ในช่วง = เขียว · นอกช่วง = แดง",
+    "info": "",
+    "x": 440,
+    "y": 800,
+    "wires": []
+  },
+  {
+    "id": "baf03564ed59cd43",
+    "type": "inject",
+    "z": "789bda55589a8d14",
+    "name": "ทดสอบ 39.5 g (OK เขียว)",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": "1",
+    "topic": "",
+    "payload": "{\"weight\":39.5,\"unit\":\"g\",\"stable\":true}",
+    "payloadType": "json",
+    "x": 160,
+    "y": 910,
+    "wires": [
+      [
+        "8aba04549d84b2c8"
+      ]
+    ]
+  },
+  {
+    "id": "600a9965ca47b941",
+    "type": "inject",
+    "z": "789bda55589a8d14",
+    "name": "ทดสอบ 41.6 g (เกิน แดง)",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": "1",
+    "topic": "",
+    "payload": "{\"weight\":41.6,\"unit\":\"g\",\"stable\":true}",
+    "payloadType": "json",
+    "x": 160,
+    "y": 950,
+    "wires": [
+      [
+        "8aba04549d84b2c8"
+      ]
+    ]
+  },
+  {
+    "id": "f6b856dfb48ecd94",
+    "type": "inject",
+    "z": "789bda55589a8d14",
+    "name": "ทดสอบ ยกออก 0 g",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": "1",
+    "topic": "",
+    "payload": "{\"weight\":0,\"unit\":\"g\",\"stable\":true}",
+    "payloadType": "json",
+    "x": 150,
+    "y": 1070,
+    "wires": [
+      [
+        "8aba04549d84b2c8"
+      ]
+    ]
+  },
+  {
+    "id": "8aba04549d84b2c8",
+    "type": "function",
+    "z": "789bda55589a8d14",
+    "name": "ตัดสิน OK / NG",
+    "func": "// @ts-nocheck\n// ===== ตัดสินผลชั่ง -> สีไฟ Tower =====\n// รับ msg.payload = { weight, unit, stable } จาก flow Extruder03 (ผ่าน link) หรือจากปุ่มทดสอบ\n// ส่งออกเฉพาะเมื่อสีเปลี่ยน: \"green\" | \"red\" | \"off\"\n// ===== ตารางมาตรฐานน้ำหนัก (Weight Standard) — พนักงานยิงบาร์โค้ดรุ่นลงช่อง PRODUCTION NAME (D210) บนจอ HMI =====\n//  อัปเดตตามใบ Weight Standard ล่าสุด (2026-10-19: SUPER SOFT 41.00-41.3)\n//  [บาร์โค้ด (ไม่เกิน 8 ตัวอักษร ตามช่องบน HMI), ชื่อรุ่น, Min g, Max g]      *** แก้ค่าในตารางนี้ได้เลย แล้ว Deploy ***\nconst SPECS = [\n    [\"S-Range\",   \"Super Range\",  40.0, 40.3],\n    [\"C-Practi\",  \"CG Practice\",  40.0, 40.3],\n    [\"P-Practi\",  \"Pro Practice\", 36.0, 36.3],\n    [\"L-Fling\",   \"LTD Flight\",   38.8, 39.2],\n    [\"S-Soft\",    \"SUPER SOFT\",   41.0, 41.3],\n    [\"W-BIRD\",    \"WAR BIRD\",     40.5, 40.5],   // ใบ Spec (อัปเดต) ยังเขียน 40.5-40.5 แต่ค่าตั้ง 40.3 -> ตรวจค่าที่ถูกต้องอีกครั้ง\n    [\"HE-DIABL\",  \"HEX DIABLO\",   41.8, 42.2],\n    [\"S-FAST\",    \"SUPER FAST\",   41.1, 41.3]\n];\n// เทียบบาร์โค้ดแบบไม่สนตัวพิมพ์เล็ก/ใหญ่ และช่องว่าง · ใช้ \"ขึ้นต้นด้วย\" (กันตัวอักษรเก่าค้างท้าย เช่น \"S-SoftBLO\")\n// ยังพิมพ์เลข 1–8 แทนได้ (สำรอง) · ไม่ตรงอะไรเลย เช่น \"CG\" = ค่าเริ่มต้น 39–41 g\nconst norm = t => String(t || \"\").toUpperCase().replace(/\\s+/g, \"\");\nconst raw = String(flow.get(\"ex03_model_raw\") || \"\").trim();\nconst key = norm(raw);\nlet code = null;\nconst byLen = SPECS.map((sp, i) => ({ i, k: norm(sp[0]) })).sort((a, b) => b.k.length - a.k.length);\nfor (const x of byLen) if (key === x.k || key.startsWith(x.k)) { code = x.i + 1; break; }\nif (!code) { const mNum = key.match(/^(\\d+)$/); if (mNum && SPECS[+mNum[1] - 1]) code = +mNum[1]; }\nconst DEFAULT = [\"Default\", 39.0, 41.0];   // ไม่ตรงกับเลขรุ่นใด / ยังไม่เลือก -> ใช้ 39–41 g\nconst spec = code ? SPECS[code - 1].slice(1) : DEFAULT;\nif (flow.get(\"ex03_model_code\") !== code) { flow.set(\"ex03_model_code\", code); flow.set(\"ex03_model\", { code: code || 0, barcode: code ? SPECS[code - 1][0] : \"\", name: spec[0], min: spec[1], max: spec[2] }); }\nconst MIN_G = spec[1], MAX_G = spec[2];\nconst EMPTY_G = 1.0;     // ไม่เกินค่านี้ = ไม่มีของบนเครื่องชั่ง -> ดับไฟ\nconst HOLD_MS = 1500;    // ยกของออกแล้ว ค้างสีไว้อีก 1.5 วินาที ให้พนักงานเห็นผลทัน\nconst FAST = true;       // true = ตัดสินทันทีที่ค่าคงที่ 2 รอบ ไม่ต้องรอเครื่องชั่งขึ้น ST\n\nconst p = msg.payload || {};\nif (p.weight === null || p.weight === undefined || isNaN(p.weight)) return null;\nconst g = String(p.unit || \"g\").toLowerCase() === \"kg\" ? p.weight * 1000 : p.weight;\n\nlet color;\nconst prevW = context.get(\"prevW\"); context.set(\"prevW\", g);\nconst steady = prevW !== undefined && Math.abs(prevW - g) < 0.05;   // ค่าไม่เปลี่ยนจากรอบก่อน\nif (g <= EMPTY_G) color = \"off\";\nelse if (!(p.stable || (FAST && steady))) return null;  // ยังแกว่ง -> คงสีเดิมไว้\nelse color = (g >= MIN_G && g <= MAX_G) ? \"green\" : \"red\";\n\n// ยกของออก: ค้างสีไว้ HOLD_MS ก่อนดับ (ถ้าวางชิ้นใหม่ระหว่างนี้ ยกเลิกการดับ)\nconst t = context.get(\"offTimer\");\nif (color !== \"off\" && t) { clearTimeout(t); context.set(\"offTimer\", null); }\nif (color === \"off\" && context.get(\"last\") && context.get(\"last\") !== \"off\") {\n    if (!t) context.set(\"offTimer\", setTimeout(() => {\n        context.set(\"offTimer\", null); context.set(\"last\", \"off\");\n        node.status({ fill: \"grey\", shape: \"dot\", text: \"OFF\" });\n        node.send({ payload: \"off\" });\n    }, HOLD_MS));\n    return null;\n}\n\nif (context.get(\"last\") === color) return null;        // สีเดิม ไม่ต้องสั่งซ้ำ\ncontext.set(\"last\", color);\nnode.status({ fill: color === \"off\" ? \"grey\" : color, shape: \"dot\",\n              text: ((code ? SPECS[code - 1][0] + \" · \" : \"[D210=\\\"\" + raw + \"\\\"] \") + spec[0] + \" · \") + color.toUpperCase() + (color === \"off\" ? \"\" : \"  \" + g + \" g  (\" + MIN_G + \"–\" + MAX_G + \")\") });\nreturn { payload: color, weight: g, model: spec[0] };",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "const t = context.get('offTimer'); if (t) clearTimeout(t);",
+    "libs": [],
+    "x": 410,
+    "y": 890,
+    "wires": [
+      [
+        "71816d8d51767579"
+      ]
+    ]
+  },
+  {
+    "id": "b217e3d6a827eacd",
+    "type": "trigger",
+    "z": "789bda55589a8d14",
+    "name": "ไม่มีข้อมูล 10 วิ → ดับ",
+    "op1": "",
+    "op2": "off",
+    "op1type": "nul",
+    "op2type": "str",
+    "duration": "10",
+    "extend": true,
+    "overrideDelay": false,
+    "units": "s",
+    "reset": "",
+    "bytopic": "all",
+    "topic": "topic",
+    "outputs": 1,
+    "x": 430,
+    "y": 950,
+    "wires": [
+      [
+        "e0bd978f159f1766",
+        "71816d8d51767579"
+      ]
+    ]
+  },
+  {
+    "id": "e0bd978f159f1766",
+    "type": "change",
+    "z": "789bda55589a8d14",
+    "name": "รีเซ็ตสีล่าสุด",
+    "rules": [
+      {
+        "t": "set",
+        "p": "payload",
+        "pt": "msg",
+        "to": "{\"weight\":0,\"unit\":\"g\",\"stable\":true}",
+        "tot": "json"
+      }
+    ],
+    "x": 640,
+    "y": 950,
+    "wires": [
+      [
+        "8aba04549d84b2c8"
+      ]
+    ]
+  },
+  {
+    "id": "5bc9926131abede8",
+    "type": "comment",
+    "z": "789bda55589a8d14",
+    "name": "③ อ่าน DI / AI (ทดสอบเซ็นเซอร์ระดับ) — กดแล้วดู Debug",
+    "info": "",
+    "x": 330,
+    "y": 1060,
+    "wires": []
+  },
+  {
+    "id": "75f06f7028307d95",
+    "type": "inject",
+    "z": "789bda55589a8d14",
+    "name": "อ่าน DI ทั้งหมด",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": "1",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 140,
+    "y": 1110,
+    "wires": [
+      [
+        "2f15173cfd8df030"
+      ]
+    ]
+  },
+  {
+    "id": "2f15173cfd8df030",
+    "type": "digital-input-all",
+    "z": "789bda55589a8d14",
+    "name": "DI1–DI4",
+    "pollInterval": 0,
+    "x": 360,
+    "y": 1110,
+    "wires": [
+      [
+        "7da2ac98df7cb03b"
+      ]
+    ]
+  },
+  {
+    "id": "f5e6d9fc82444081",
+    "type": "inject",
+    "z": "789bda55589a8d14",
+    "name": "อ่าน AI1/AI2",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": "1",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 140,
+    "y": 1160,
+    "wires": [
+      [
+        "53f6abc4f91857f9"
+      ]
+    ]
+  },
+  {
+    "id": "53f6abc4f91857f9",
+    "type": "analog-input",
+    "z": "789bda55589a8d14",
+    "name": "AI1/AI2",
+    "serialPath": "/dev/ttyS3",
+    "ai1Type": "voltage",
+    "ai2Type": "voltage",
+    "command": "read",
+    "interval": 100,
+    "x": 360,
+    "y": 1160,
+    "wires": [
+      [
+        "7da2ac98df7cb03b"
+      ]
+    ]
+  },
+  {
+    "id": "7da2ac98df7cb03b",
+    "type": "debug",
+    "z": "789bda55589a8d14",
+    "name": "DI / AI",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "x": 560,
+    "y": 1135,
+    "wires": []
+  },
+  {
+    "id": "022be2add2e60010",
+    "type": "inject",
+    "z": "789bda55589a8d14",
+    "name": "ทดสอบ 38.6 g (น้อย แดง)",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": "1",
+    "topic": "",
+    "payload": "{\"weight\":38.6,\"unit\":\"g\",\"stable\":true}",
+    "payloadType": "json",
+    "x": 160,
+    "y": 1030,
+    "wires": [
+      [
+        "8aba04549d84b2c8"
+      ]
+    ]
+  },
+  {
+    "id": "11fe0000000c0001",
+    "type": "comment",
+    "z": "789bda55589a8d14",
+    "name": "ค่าสด (live) → หน้า WeightLog.aspx แสดงตัวเลขวิ่งตามตราชั่ง (ไม่บันทึก DB)",
+    "info": "",
+    "x": 400,
+    "y": 400,
+    "wires": []
+  },
+  {
+    "id": "11fe0000000c0002",
+    "type": "function",
+    "z": "789bda55589a8d14",
+    "name": "ส่งค่าสด (live)",
+    "func": "// @ts-nocheck\n// ===== ส่ง \"ค่าสด\" ให้หน้า WeightLog.aspx แสดงตัวเลขวิ่งตามตราชั่ง (ไม่บันทึกลง DB) =====\n// - ส่งเฉพาะตอนค่าเปลี่ยน และมีของบนตราชั่ง (> 1.0 g) · ยกออกแล้วส่ง 0 ครั้งเดียว\n// - ตราชั่งว่าง: ส่ง heartbeat ทุก 5 วิ ให้หน้าเว็บรู้ว่าตราชั่งยังออนไลน์\n// - รอบก่อนยังส่งไม่เสร็จ -> ข้าม (ไม่ให้คำขอค้างซ้อนกัน)\nconst MACHINE = \"Extruder03\", MIN_G = 1.0, HEARTBEAT_MS = 5000, BUSY_MS = 3000;\nconst p = msg.payload || {};\nif (p.weight === null || p.weight === undefined || isNaN(p.weight)) return null;\nconst now = Date.now();\nconst busy = flow.get(\"ex03_live_busy\") || 0;\nif (busy && now - busy < BUSY_MS) return null;\nconst g = String(p.unit || \"g\").toLowerCase() === \"kg\" ? p.weight * 1000 : p.weight;\nconst loaded = g > MIN_G;\nconst prev = context.get(\"prevW\");\ncontext.set(\"prevW\", p.weight);\nconst settled = loaded && (p.stable || prev === p.weight);   // นิ่ง = เครื่องชั่งขึ้น ST หรือค่าเท่ารอบก่อน (เหมือนตอนตัดสินไฟ)\nconst key = (loaded ? p.weight : 0) + \"|\" + settled;\nconst last = context.get(\"last\") || {};\nconst changed = key !== last.key;\nif (!changed && (loaded || now - (last.t || 0) < HEARTBEAT_MS)) return null;\ncontext.set(\"last\", { key, t: now });\nflow.set(\"ex03_live_busy\", now);\nconst md = flow.get(\"ex03_model\");\nconst res = settled && md ? (p.weight >= md.min && p.weight <= md.max ? \"OK\" : \"NG\") : \"\";\nnode.status({ fill: settled ? (res === \"NG\" ? \"red\" : \"green\") : loaded ? \"yellow\" : \"grey\", shape: \"dot\",\n              text: loaded ? p.weight + \" \" + (p.unit || \"\") + (settled ? \" · นิ่ง \" + res : \" · กำลังชั่ง\") : \"ว่าง (heartbeat)\" });\nreturn { payload: { live: true, machine: MACHINE, weight: loaded ? p.weight : 0, unit: p.unit || \"g\", stable: settled,\n                    model: md ? md.name : \"\", barcode: md ? (md.barcode || \"\") : \"\", code: 0, min: md ? md.min : null, max: md ? md.max : null, result: res } };",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 370,
+    "y": 450,
+    "wires": [
+      [
+        "11fe0000000c0003"
+      ]
+    ]
+  },
+  {
+    "id": "11fe0000000c0003",
+    "type": "http request",
+    "z": "789bda55589a8d14",
+    "name": "POST live",
+    "method": "POST",
+    "ret": "txt",
+    "paytoqs": "ignore",
+    "url": "http://192.168.100.20/Dashboard/WeightLog.aspx",
+    "tls": "",
+    "persist": true,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 560,
+    "y": 450,
+    "wires": [
+      [
+        "11fe0000000c0004"
+      ]
+    ]
+  },
+  {
+    "id": "11fe0000000c0004",
+    "type": "function",
+    "z": "789bda55589a8d14",
+    "name": "ส่งสดเสร็จ",
+    "func": "// ส่งค่าสดเสร็จ (สำเร็จหรือ error) -> ปลดล็อกให้ส่งรอบถัดไปได้\nflow.set(\"ex03_live_busy\", 0);\nconst ok = msg.statusCode === 200;\nnode.status(ok ? { fill: \"green\", shape: \"dot\", text: \"OK \" + new Date().toLocaleTimeString(\"th-TH\") }\n               : { fill: \"red\", shape: \"ring\", text: msg.error ? \"ส่งไม่ได้: \" + (msg.error.message || msg.error) : \"HTTP \" + msg.statusCode });\nreturn null;",
+    "outputs": 0,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 730,
+    "y": 450,
+    "wires": []
+  },
+  {
+    "id": "11fe0000000c0005",
+    "type": "catch",
+    "z": "789bda55589a8d14",
+    "name": "live error",
+    "scope": [
+      "11fe0000000c0003"
+    ],
+    "uncaught": false,
+    "x": 560,
+    "y": 500,
+    "wires": [
+      [
+        "11fe0000000c0004"
+      ]
+    ]
+  }
+]

@@ -1,0 +1,298 @@
+[
+ {
+  "id": "dd912a6e35761dc6",
+  "type": "tab",
+  "label": "Extruder03 น้ำหนัก (FINS)",
+  "disabled": false,
+  "info": "อ่าน D540-D579 จาก Omron NJ 192.168.250.1 ด้วย FINS UDP SA1=2 แล้วถอด ASCII เป็นน้ำหนัก"
+ },
+ {
+  "id": "f77d584bf79feca8",
+  "type": "comment",
+  "z": "dd912a6e35761dc6",
+  "name": "Deploy → Debug 'น้ำหนัก' / เปิด debug 'dump' เพื่อดูว่าตัวเลขอยู่ D ไหน",
+  "info": "",
+  "x": 330,
+  "y": 40,
+  "wires": []
+ },
+ {
+  "id": "8c849a4c26ec9cd4",
+  "type": "inject",
+  "z": "dd912a6e35761dc6",
+  "name": "ทุก 2 วินาที",
+  "props": [
+   {
+    "p": "payload"
+   }
+  ],
+  "repeat": "2",
+  "crontab": "",
+  "once": true,
+  "onceDelay": "2",
+  "topic": "",
+  "payload": "",
+  "payloadType": "date",
+  "x": 140,
+  "y": 100,
+  "wires": [
+   [
+    "eaa70bc86e1eb7f5"
+   ]
+  ]
+ },
+ {
+  "id": "eaa70bc86e1eb7f5",
+  "type": "function",
+  "z": "dd912a6e35761dc6",
+  "name": "อ่านน้ำหนัก D550 (FINS UDP)",
+  "func": "// @ts-nocheck\n// ===== Extruder03 : อ่านน้ำหนักจาก PLC Omron NJ 192.168.250.1 ด้วย FINS UDP (ทดสอบแล้วว่า SA1=2 ใช้ได้) =====\n// ค่าที่เจอ D554=12336 (0x3030 = \"00\"), D555=11824 (0x2E30 = \".0\") → PLC เก็บน้ำหนักเป็น \"ตัวอักษร ASCII\" จากเครื่องชั่ง\n// จึงอ่านช่วง D540–D579 มาทั้งก้อน แล้วถอดเป็นข้อความ หาเลขน้ำหนักในนั้น\n// NJ เก็บ STRING แบบ byte ต่ำก่อน -> ต้องสลับ byte ในแต่ละ word (\"TS+,\" -> \"ST,+\")\n// รูปแบบเครื่องชั่ง: \"ST,+0000.000 g\"  ST=นิ่ง US=ยังไม่นิ่ง OL=เกินพิกัด\nconst HOST = \"192.168.250.1\", DA1 = 1, SA1 = 2;\nconst START = 540, COUNT = 40;          // ช่วงที่อ่าน (ดู dump แล้วค่อยแคบลงได้)\nconst W_FROM = 550, W_TO = 565;         // ช่วงที่ใช้หาเลขน้ำหนัก (word)\nconst SWAP = true;                      // สลับ byte (NJ = true)\nconst RETRY = 2;                        // ลองซ้ำเมื่อ timeout (สายมี packet หาย)\nconst ERR_AFTER = 5;                    // timeout ติดกันกี่ครั้งถึงแจ้ง error\n\nfunction wordStr(w) { let a = (w >> 8) & 0xFF, b = w & 0xFF; if (SWAP) { const t = a; a = b; b = t; } return [a, b].map(c => c >= 32 && c < 127 ? String.fromCharCode(c) : \"·\").join(\"\"); }\n\nif (context.get(\"busy\")) return null;\ncontext.set(\"busy\", true);\nconst sid = ((context.get(\"sid\") || 0) + 1) & 0xFF; context.set(\"sid\", sid);\nconst req = Buffer.from([0x80, 0, 0x02, 0, DA1, 0, 0, SA1, 0, sid,\n    0x01, 0x01, 0x82, (START >> 8) & 0xFF, START & 0xFF, 0, (COUNT >> 8) & 0xFF, COUNT & 0xFF]);\nfunction attempt(left) {\nconst s = dgram.createSocket(\"udp4\"); let done = false;\nconst finish = (err, r) => {\n    if (done) return; done = true; try { s.close(); } catch (e) {}\n    if (err && left > 0) return attempt(left - 1);\n    context.set(\"busy\", false);\n    if (err) {\n        const n = (context.get(\"fail\") || 0) + 1; context.set(\"fail\", n);\n        if (n >= ERR_AFTER) node.status({ fill: \"red\", shape: \"ring\", text: err + \" ติดกัน \" + n + \" ครั้ง\" });\n        if (n === ERR_AFTER || (n > ERR_AFTER && n % 60 === 0)) node.send([null, null, { payload: { error: err + \" ติดกัน \" + n + \" ครั้ง (เช็คสาย LAN / PLC)\" } }]);\n        return;\n    }\n    context.set(\"fail\", 0);\n    const ec = r.readUInt16BE(12);\n    if (ec !== 0 && ec !== 0x0040) { node.status({ fill: \"red\", shape: \"dot\", text: \"end code 0x\" + ec.toString(16) }); node.send([null, null, { payload: { error: \"PLC end code 0x\" + ec.toString(16) } }]); return; }\n    const w = []; for (let k = 0; k < COUNT; k++) w.push(r.readUInt16BE(14 + k * 2));\n    const at = d => w[d - START];\n    // ข้อความ ASCII ของช่วงน้ำหนัก\n    let txt = \"\"; for (let d = W_FROM; d <= W_TO; d++) txt += wordStr(at(d));\n    txt = txt.replace(/·/g, \" \").replace(/\\s+/g, \" \").trim();\n    // \"ST,+0000.000 g\" -> สถานะ, เครื่องหมาย, ตัวเลข, หน่วย (เอาชุดแรก)\n    const mm = txt.match(/([A-Z]{2})?\\s*,?\\s*([+-])?\\s*(\\d+(?:\\.\\d+)?)\\s*([a-z]{1,3})?/);\n    const weight = mm ? parseFloat((mm[2] === \"-\" ? \"-\" : \"\") + mm[3]) : null;\n    const UNIT = (mm && mm[4]) || \"\";\n    const stat = mm && mm[1] ? ({ ST: \"นิ่ง\", US: \"ยังไม่นิ่ง\", OL: \"เกินพิกัด\", QT: \"นับชิ้น\" }[mm[1]] || mm[1]) : \"\";\n    flow.set(\"ex03_weight\", { weight, unit: UNIT, stable: mm && mm[1] === \"ST\", text: txt, ts: Date.now() });\n    node.status({ fill: weight === null ? \"yellow\" : mm[1] === \"ST\" ? \"green\" : \"yellow\", shape: \"dot\", text: (weight === null ? \"ไม่พบตัวเลข\" : weight + \" \" + UNIT + (stat ? \" · \" + stat : \"\")) });\n    const dump = {};\n    for (let d = START; d < START + COUNT; d++) { const v = at(d); dump[\"D\" + d] = v + \" | 0x\" + v.toString(16).padStart(4, \"0\") + \" | \\\"\" + wordStr(v) + \"\\\"\"; }\n    let all = \"\"; for (let d = START; d < START + COUNT; d++) all += wordStr(at(d));\n    node.send([\n        { payload: { machine: \"Extruder03\", weight, unit: UNIT, stable: !!(mm && mm[1] === \"ST\"), สถานะ: stat, ข้อความจากเครื่องชั่ง: txt, time: new Date().toLocaleTimeString(\"th-TH\") } },\n        { payload: { [\"ข้อความ D\" + START + \"-D\" + (START + COUNT - 1)]: all, ...dump } },\n        null\n    ]);\n};\ns.on(\"error\", e => finish(\"socket \" + e.code));\ns.on(\"message\", r => { if (r.length >= 14 && r[9] === sid) finish(null, r); });\ns.bind(0, () => {\n    s.send(req, 9600, HOST, e => { if (e) finish(\"send \" + e.code); });\n    setTimeout(() => finish(\"timeout\"), 700);\n});\n}\nattempt(RETRY);\nreturn null;",
+  "outputs": 3,
+  "timeout": 0,
+  "noerr": 0,
+  "initialize": "",
+  "finalize": "context.set('busy', false);",
+  "libs": [
+   {
+    "var": "dgram",
+    "module": "dgram"
+   }
+  ],
+  "x": 380,
+  "y": 100,
+  "wires": [
+   [
+    "004941835a5008c8",
+    "08e69271a0df4965",
+    "4dbc537fe4ac7f5e"
+   ],
+   [
+    "48ae3a76d94ccb68"
+   ],
+   [
+    "6c46c1fe57010c12"
+   ]
+  ]
+ },
+ {
+  "id": "004941835a5008c8",
+  "type": "debug",
+  "z": "dd912a6e35761dc6",
+  "name": "น้ำหนัก",
+  "active": false,
+  "tosidebar": true,
+  "console": false,
+  "tostatus": false,
+  "complete": "payload",
+  "targetType": "msg",
+  "x": 640,
+  "y": 60,
+  "wires": []
+ },
+ {
+  "id": "48ae3a76d94ccb68",
+  "type": "debug",
+  "z": "dd912a6e35761dc6",
+  "name": "dump D540-579 (เปิดเมื่อต้องการดู)",
+  "active": false,
+  "tosidebar": true,
+  "console": false,
+  "tostatus": false,
+  "complete": "payload",
+  "targetType": "msg",
+  "x": 700,
+  "y": 100,
+  "wires": []
+ },
+ {
+  "id": "6c46c1fe57010c12",
+  "type": "debug",
+  "z": "dd912a6e35761dc6",
+  "name": "error",
+  "active": true,
+  "tosidebar": true,
+  "console": false,
+  "tostatus": false,
+  "complete": "payload",
+  "targetType": "msg",
+  "x": 630,
+  "y": 140,
+  "wires": []
+ },
+ {
+  "id": "fb680f5773a00d4e",
+  "type": "comment",
+  "z": "dd912a6e35761dc6",
+  "name": "ส่งขึ้น Server เฉพาะตอนชั่งเสร็จ (น้ำหนัก > 1.0 g + นิ่ง) → WeightLog.aspx",
+  "info": "",
+  "x": 360,
+  "y": 220,
+  "wires": []
+ },
+ {
+  "id": "08e69271a0df4965",
+  "type": "function",
+  "z": "dd912a6e35761dc6",
+  "name": "ส่งเมื่อชั่งเสร็จ (>1.0 g)",
+  "func": "// @ts-nocheck\n// ===== ส่งน้ำหนักขึ้น Server เฉพาะ \"ชั่งเสร็จ 1 ครั้ง\" =====\n// - น้ำหนัก ไม่เกิน 1.0 g : ไม่ส่ง (รอวางของ / ค่าแกว่ง)\n// - วางของแล้ว + นิ่ง (ST) + ค่าเดิมติดกัน NEED_SAME รอบ -> ส่ง 1 ครั้ง\n// - ยังวางค้างอยู่ -> ไม่ส่งซ้ำ จนกว่าจะยกออก (กลับเป็น 0) แล้ววางชิ้นใหม่\n// - ส่งไม่สำเร็จ -> เก็บคิวไว้ ส่งใหม่รอบถัดไป (ไม่หาย)\nconst MACHINE     = \"Extruder03\";\nconst MIN_G       = 1.0;   // ส่งเมื่อน้ำหนัก > 1.0 g เท่านั้น (หน่วย kg จะแปลงเป็นกรัมก่อนเทียบ)\nconst NEED_SAME   = 2;     // ค่าเดิมติดกันกี่รอบถึงนับว่านิ่ง (รอบละ 2 วินาที)\nconst RESEND_DIFF = 0;     // วางค้างแต่น้ำหนักเปลี่ยนเกินค่านี้ -> ส่งใหม่ (0 = ไม่ส่ง)\n\n// ส่งของที่ค้างในคิวก่อน (ครั้งละ 1)\nconst q = flow.get(\"ex03_queue\") || [];\nif (q.length) { const item = q.shift(); flow.set(\"ex03_queue\", q); node.send({ payload: item, queued: true }); }\n\nconst p = msg.payload || {}, w = p.weight;\nif (w === null || w === undefined || isNaN(w)) return null;\n\nconst grams = String(p.unit || \"\").toLowerCase() === \"kg\" ? w * 1000 : w;\nif (grams <= MIN_G) {\n    context.set(\"armed\", true); context.set(\"same\", 0); context.set(\"last\", null);\n    node.status({ fill: \"grey\", shape: \"ring\", text: \"รอวางของ · ส่งแล้ว \" + (context.get(\"count\") || 0) + \" ครั้ง\" + (q.length ? \" · ค้างคิว \" + q.length : \"\") });\n    return null;\n}\nconst same = context.get(\"last\") === w ? (context.get(\"same\") || 0) + 1 : 1;\ncontext.set(\"same\", same); context.set(\"last\", w);\nif (!p.stable || same < NEED_SAME) { node.status({ fill: \"yellow\", shape: \"ring\", text: \"รอนิ่ง \" + w + \" \" + (p.unit || \"\") }); return null; }\n\nconst armed = context.get(\"armed\") !== false, sentW = context.get(\"sentW\");\nif (armed || (RESEND_DIFF > 0 && sentW != null && Math.abs(w - sentW) >= RESEND_DIFF)) {\n    context.set(\"armed\", false); context.set(\"sentW\", w);\n    const n = (context.get(\"count\") || 0) + 1; context.set(\"count\", n);\n    node.status({ fill: \"green\", shape: \"dot\", text: \"ส่ง \" + w + \" \" + (p.unit || \"\") + \" · ครั้งที่ \" + n });\n    return { payload: { machine: MACHINE, weight: w, unit: p.unit || \"\", stable: true, text: p[\"ข้อความจากเครื่องชั่ง\"] || \"\" } };\n}\nnode.status({ fill: \"blue\", shape: \"dot\", text: \"ส่งแล้ว \" + sentW + \" · รอยกของออก\" });\nreturn null;",
+  "outputs": 1,
+  "timeout": 0,
+  "noerr": 0,
+  "initialize": "",
+  "finalize": "",
+  "libs": [],
+  "x": 380,
+  "y": 270,
+  "wires": [
+   [
+    "27c3c3a579dae715"
+   ]
+  ]
+ },
+ {
+  "id": "27c3c3a579dae715",
+  "type": "change",
+  "z": "dd912a6e35761dc6",
+  "name": "จำ body",
+  "rules": [
+   {
+    "t": "set",
+    "p": "sent",
+    "pt": "msg",
+    "to": "payload",
+    "tot": "msg"
+   }
+  ],
+  "x": 570,
+  "y": 270,
+  "wires": [
+   [
+    "9699255ad88d4574"
+   ]
+  ]
+ },
+ {
+  "id": "9699255ad88d4574",
+  "type": "http request",
+  "z": "dd912a6e35761dc6",
+  "name": "POST WeightLog",
+  "method": "POST",
+  "ret": "obj",
+  "paytoqs": "ignore",
+  "url": "http://192.168.100.20/Dashboard/WeightLog.aspx",
+  "tls": "",
+  "persist": false,
+  "proxy": "",
+  "insecureHTTPParser": false,
+  "authType": "",
+  "senderr": false,
+  "headers": [],
+  "x": 740,
+  "y": 270,
+  "wires": [
+   [
+    "d6b6b33335ac374e"
+   ]
+  ]
+ },
+ {
+  "id": "d6b6b33335ac374e",
+  "type": "function",
+  "z": "dd912a6e35761dc6",
+  "name": "เช็คผล",
+  "func": "// server ตอบไม่ใช่ 200 -> เข้าคิวเหมือน error\nif (msg.statusCode !== 200) {\n    const q = flow.get(\"ex03_queue\") || [];\n    const body = msg.sent || null;\n    if (body && q.length < 500) { q.push(body); flow.set(\"ex03_queue\", q); }\n    node.status({ fill: \"red\", shape: \"ring\", text: \"HTTP \" + msg.statusCode + \" · ค้างคิว \" + q.length });\n} else node.status({ fill: \"green\", shape: \"dot\", text: \"บันทึกแล้ว \" + new Date().toLocaleTimeString(\"th-TH\") });\nreturn msg;",
+  "outputs": 1,
+  "timeout": 0,
+  "noerr": 0,
+  "initialize": "",
+  "finalize": "",
+  "libs": [],
+  "x": 910,
+  "y": 270,
+  "wires": [
+   [
+    "fa1d473208076501"
+   ]
+  ]
+ },
+ {
+  "id": "fa1d473208076501",
+  "type": "debug",
+  "z": "dd912a6e35761dc6",
+  "name": "server ตอบ",
+  "active": true,
+  "tosidebar": true,
+  "console": false,
+  "tostatus": false,
+  "complete": "payload",
+  "targetType": "msg",
+  "x": 1070,
+  "y": 270,
+  "wires": []
+ },
+ {
+  "id": "dd1965b8adc519bb",
+  "type": "catch",
+  "z": "dd912a6e35761dc6",
+  "name": "ส่งไม่ได้",
+  "scope": [
+   "9699255ad88d4574"
+  ],
+  "uncaught": false,
+  "x": 740,
+  "y": 330,
+  "wires": [
+   [
+    "17b1de088162ecac"
+   ]
+  ]
+ },
+ {
+  "id": "17b1de088162ecac",
+  "type": "function",
+  "z": "dd912a6e35761dc6",
+  "name": "เก็บเข้าคิว",
+  "func": "// ส่งไม่สำเร็จ -> เก็บเข้าคิว (สูงสุด 500 รายการ) ให้ node ส่งค่าลองใหม่\nconst q = flow.get(\"ex03_queue\") || [];\nif (msg.sent && msg.sent.weight > 0 && q.length < 500) q.push(msg.sent);\nflow.set(\"ex03_queue\", q);\nnode.status({ fill: \"red\", shape: \"ring\", text: \"ส่งไม่ได้ · ค้างคิว \" + q.length });\nreturn { payload: { error: msg.error && msg.error.message, ค้างคิว: q.length } };",
+  "outputs": 1,
+  "timeout": 0,
+  "noerr": 0,
+  "initialize": "",
+  "finalize": "",
+  "libs": [],
+  "x": 910,
+  "y": 330,
+  "wires": [
+   [
+    "e356d7abd09ca4d7"
+   ]
+  ]
+ },
+ {
+  "id": "e356d7abd09ca4d7",
+  "type": "debug",
+  "z": "dd912a6e35761dc6",
+  "name": "ส่งไม่ได้",
+  "active": true,
+  "tosidebar": true,
+  "console": false,
+  "tostatus": false,
+  "complete": "payload",
+  "targetType": "msg",
+  "x": 1070,
+  "y": 330,
+  "wires": []
+ },
+ {
+  "id": "4dbc537fe4ac7f5e",
+  "type": "link out",
+  "z": "dd912a6e35761dc6",
+  "name": "→ Tower light",
+  "mode": "link",
+  "links": [
+   "41b575fc106d46ef"
+  ],
+  "x": 640,
+  "y": 300,
+  "wires": []
+ }
+]

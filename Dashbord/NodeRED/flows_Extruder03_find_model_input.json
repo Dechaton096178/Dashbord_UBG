@@ -1,0 +1,101 @@
+[
+  {
+    "id": "7a1c00000000a001",
+    "type": "tab",
+    "label": "Ex03 หา D ที่คีย์รุ่น",
+    "disabled": false,
+    "info": "① จำค่าก่อน → คีย์เลขบน HMI + ENT → ② เทียบหลังคีย์"
+  },
+  {
+    "id": "7a1c00000000a002",
+    "type": "inject",
+    "z": "7a1c00000000a001",
+    "name": "① จำค่าก่อน",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "snap",
+    "payloadType": "str",
+    "x": 140,
+    "y": 80,
+    "wires": [
+      [
+        "7a1c00000000a004"
+      ]
+    ]
+  },
+  {
+    "id": "7a1c00000000a003",
+    "type": "inject",
+    "z": "7a1c00000000a001",
+    "name": "② เทียบหลังคีย์",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "compare",
+    "payloadType": "str",
+    "x": 150,
+    "y": 140,
+    "wires": [
+      [
+        "7a1c00000000a004"
+      ]
+    ]
+  },
+  {
+    "id": "7a1c00000000a004",
+    "type": "function",
+    "z": "7a1c00000000a001",
+    "name": "เทียบค่า D/W/H ก่อน-หลัง",
+    "func": "// @ts-nocheck\n// ===== หาว่าคีย์เลขรุ่นบน HMI แล้วไปเปลี่ยนที่ D ไหน (อ่านอย่างเดียว) =====\n// 1) กด \"① จำค่าก่อน\"  2) ไปคีย์เลขบนจอ HMI (เช่น 2) แล้วกด ENT  3) กด \"② เทียบหลังคีย์\"\nconst HOST = \"192.168.250.1\", DA1 = 1, SA1 = 50;     // SA1 = เลขท้าย IP กล่อง\nconst AREAS = [[\"D\", 0x82, 0, 2999], [\"W\", 0xB1, 0, 511], [\"H\", 0xB2, 0, 511]];\nconst CHUNK = 200;\nconst SKIP = d => d.startsWith(\"D\") && +d.slice(1) >= 540 && +d.slice(1) <= 579;   // ข้ามช่วงเครื่องชั่ง (ค่าวิ่งตลอด)\n\nif (context.get(\"busy\")) return null;\ncontext.set(\"busy\", true);\nconst mode = msg.payload === \"compare\" ? \"compare\" : \"snap\";\nconst sock = dgram.createSocket(\"udp4\");\nlet sid = 0, pending = null;\nsock.on(\"message\", r => { if (pending && r.length >= 14 && r[9] === sid) pending(null, r); });\nsock.on(\"error\", e => pending && pending(\"socket \" + e.code));\nfunction read(area, start, count) {\n    return new Promise(res => {\n        sid = (sid + 1) & 0xFF;\n        const t = setTimeout(() => pending && pending(\"timeout\"), 1200);\n        pending = (err, r) => {\n            clearTimeout(t); pending = null;\n            if (err) return res({ err });\n            const ec = r.readUInt16BE(12);\n            if (ec !== 0 && ec !== 0x0040) return res({ err: \"end code 0x\" + ec.toString(16) });\n            const w = []; for (let k = 0; k < count; k++) w.push(r.readUInt16BE(14 + k * 2));\n            res({ w });\n        };\n        sock.send(Buffer.from([0x80, 0, 0x02, 0, DA1, 0, 0, SA1, 0, sid, 0x01, 0x01, area,\n            (start >> 8) & 0xFF, start & 0xFF, 0, (count >> 8) & 0xFF, count & 0xFF]), 9600, HOST, e => { if (e && pending) pending(\"send \" + e.code); });\n    });\n}\nconst ch = c => (c >= 32 && c < 127 ? String.fromCharCode(c) : \"·\");\nconst sw = w => ch(w & 0xFF) + ch((w >> 8) & 0xFF);      // แบบ NJ (สลับ byte)\nconst nm = w => ch((w >> 8) & 0xFF) + ch(w & 0xFF);      // แบบปกติ\n\n(async () => {\n    sock.bind(0);\n    const mem = {}, errs = [];\n    for (const [name, code, from, to] of AREAS) {\n        for (let s = from; s <= to; s += CHUNK) {\n            const n = Math.min(CHUNK, to - s + 1);\n            node.status({ fill: \"blue\", shape: \"dot\", text: \"กำลังอ่าน \" + name + s + \"…\" });\n            const r = await read(code, s, n);\n            if (r.err) { errs.push(name + s + \": \" + r.err); continue; }\n            r.w.forEach((v, k) => mem[name + (s + k)] = v);\n        }\n    }\n    try { sock.close(); } catch (e) {}\n    context.set(\"busy\", false);\n    if (mode === \"snap\") {\n        flow.set(\"hmi_snap\", mem);\n        node.status({ fill: \"green\", shape: \"dot\", text: \"จำค่าแล้ว \" + Object.keys(mem).length + \" word · ไปคีย์เลขบน HMI แล้วกด ②\" });\n        node.send({ payload: { \"ขั้นต่อไป\": \"คีย์เลขรุ่นบนจอ HMI แล้วกด ENT จากนั้นกด ② เทียบหลังคีย์\", \"อ่านไม่ได้\": errs.length ? errs : undefined } });\n        return;\n    }\n    const old = flow.get(\"hmi_snap\");\n    if (!old) { node.status({ fill: \"yellow\", shape: \"ring\", text: \"ยังไม่ได้กด ① ก่อน\" }); return; }\n    const changes = [];\n    for (const k of Object.keys(mem)) {\n        if (old[k] === undefined || old[k] === mem[k] || SKIP(k)) continue;\n        const a = old[k], b = mem[k];\n        changes.push({ \"ที่อยู่\": k, \"ก่อน\": a + \" (0x\" + a.toString(16).padStart(4, \"0\") + \") \\\"\" + sw(a) + \"\\\"\", \"หลัง\": b + \" (0x\" + b.toString(16).padStart(4, \"0\") + \") \\\"\" + sw(b) + \"\\\" / ปกติ \\\"\" + nm(b) + \"\\\"\" });\n    }\n    node.status({ fill: changes.length ? \"green\" : \"yellow\", shape: \"dot\", text: \"เปลี่ยน \" + changes.length + \" ตำแหน่ง\" });\n    node.send({ payload: { \"จำนวนที่เปลี่ยน\": changes.length, \"ตำแหน่งที่เปลี่ยน\": changes.slice(0, 100), \"อ่านไม่ได้\": errs.length ? errs : undefined } });\n})();\nreturn null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "dgram",
+        "module": "dgram"
+      }
+    ],
+    "x": 400,
+    "y": 110,
+    "wires": [
+      [
+        "7a1c00000000a005"
+      ]
+    ]
+  },
+  {
+    "id": "7a1c00000000a005",
+    "type": "debug",
+    "z": "7a1c00000000a001",
+    "name": "ผลเทียบ",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 630,
+    "y": 110,
+    "wires": []
+  }
+]

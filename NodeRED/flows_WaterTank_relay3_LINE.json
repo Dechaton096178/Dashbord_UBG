@@ -1,0 +1,356 @@
+[
+ {
+  "id": "fbb2ba42869c57f8",
+  "type": "tab",
+  "label": "ถังน้ำ (Relay 3 ตัว → LINE)",
+  "disabled": false,
+  "info": "Relay1 EMPTY=DI1 · Relay2 MID=DI2 · Relay3 FULL=DI3 → WaterTank.aspx (แจ้ง LINE ที่ฝั่งเว็บ)"
+ },
+ {
+  "id": "ff3e387e231f224f",
+  "type": "comment",
+  "z": "fbb2ba42869c57f8",
+  "name": "Relay1 EMPTY → DI1 · Relay2 MID → DI2 · Relay3 FULL → DI3 (แก้ช่อง/กลับด้าน NC ได้ในโหนด 'Relay → ระดับ')",
+  "info": "",
+  "x": 360,
+  "y": 40,
+  "wires": []
+ },
+ {
+  "id": "6ac61d57954dd05f",
+  "type": "inject",
+  "z": "fbb2ba42869c57f8",
+  "name": "อ่านทุก 1 วิ",
+  "props": [
+   {
+    "p": "payload"
+   }
+  ],
+  "repeat": "1",
+  "crontab": "",
+  "once": true,
+  "onceDelay": "3",
+  "topic": "",
+  "payload": "",
+  "payloadType": "date",
+  "x": 140,
+  "y": 100,
+  "wires": [
+   [
+    "50e9c9fd1f0372df"
+   ]
+  ]
+ },
+ {
+  "id": "50e9c9fd1f0372df",
+  "type": "digital-input-all",
+  "z": "fbb2ba42869c57f8",
+  "name": "DI1–DI4",
+  "pollInterval": 0,
+  "x": 320,
+  "y": 100,
+  "wires": [
+   [
+    "b99260dd1fbc4fd6",
+    "b25ce9609eaa0283"
+   ]
+  ]
+ },
+ {
+  "id": "b25ce9609eaa0283",
+  "type": "debug",
+  "z": "fbb2ba42869c57f8",
+  "name": "ค่า DI ดิบ (กดเปิดถ้าต้องการ ทุก 1 วิ)",
+  "active": false,
+  "tosidebar": true,
+  "console": false,
+  "tostatus": false,
+  "complete": "true",
+  "targetType": "full",
+  "statusVal": "",
+  "statusType": "auto",
+  "x": 330,
+  "y": 150,
+  "wires": []
+ },
+ {
+  "id": "b99260dd1fbc4fd6",
+  "type": "function",
+  "z": "fbb2ba42869c57f8",
+  "name": "Relay → ระดับ",
+  "func": "// @ts-nocheck\n// ===== Relay ระดับน้ำ 3 ตัว → 4 ระดับ =====\n//   Relay1 = EMPTY (DI1) · Relay2 = MID (DI2) · Relay3 = FULL (DI3)\n//   R1 ติด  R2 ติด  R3 ติด  = full   (เต็ม)\n//   R1 ติด  R2 ติด  R3 ดับ  = normal (ปกติ)\n//   R1 ติด  R2 ดับ  R3 ดับ  = low    (ใกล้หมด)\n//   R1 ดับ  R2 ดับ  R3 ดับ  = empty  (หมด)\n//   แบบอื่น (เช่น R3 ติด แต่ R2 ดับ)  = fault  (Relay/สายผิดปกติ)\n// ส่งไป WaterTank.aspx เมื่อระดับเปลี่ยน (ต้องนิ่ง STABLE_MS ก่อน) + ส่งซ้ำทุก HEARTBEAT_MS ให้หน้าเว็บรู้ว่ายังออนไลน์\n// ===================== ตั้งค่า =====================\nconst TANK = \"Water1\";\nconst DI_EMPTY = 1;         // Relay1 EMPTY ต่อเข้า DI ช่องไหน\nconst DI_MID = 2;           // Relay2 MID\nconst DI_FULL = 3;          // Relay3 FULL\nconst INVERT = false;       // true = ใช้หน้าสัมผัส NC (Relay ติด แต่ DI ดับ) · ถ้าหน้าเว็บแสดงกลับด้าน ให้เปลี่ยนตรงนี้\nconst STABLE_MS = 10000;    // ค่าต้องเหมือนเดิมต่อเนื่อง 10 วิ ถึงจะยอมเปลี่ยนระดับ (กันน้ำกระเพื่อม)\nconst HEARTBEAT_MS = 60000; // ส่งสถานะซ้ำทุก 60 วิ\n// ==================================================\n\nfunction truthy(v) {\n    if (v === null || v === undefined) return null;\n    if (typeof v === \"boolean\") return v;\n    if (typeof v === \"number\") return v !== 0;\n    const s = String(v).trim().toLowerCase();\n    if ([\"1\", \"true\", \"on\", \"high\"].includes(s)) return true;\n    if ([\"0\", \"false\", \"off\", \"low\"].includes(s)) return false;\n    return null;\n}\n// รองรับหลายรูปแบบจาก digital-input-all : {DI1:1,...} / {di1:true} / [1,0,0,0] / ตัวเลขบิต / msg.DI1\nfunction pick(m, n) {\n    const p = m.payload; let v;\n    if (Array.isArray(p)) v = p[n - 1];\n    else if (p && typeof p === \"object\") {\n        for (const k of [\"DI\" + n, \"di\" + n, \"Di\" + n, \"DI_\" + n, \"di_\" + n, \"input\" + n, \"IN\" + n, String(n)])\n            if (p[k] !== undefined) { v = p[k]; break; }\n        if (v && typeof v === \"object\") v = v.value ?? v.state ?? v.status;\n    }\n    else if (typeof p === \"number\" && Number.isInteger(p)) v = (p >> (n - 1)) & 1;   // bitmask\n    if (v === undefined && m[\"DI\" + n] !== undefined) v = m[\"DI\" + n];\n    return truthy(v);\n}\nconst TH = { full: \"เต็ม\", normal: \"ปกติ\", low: \"ใกล้หมด\", empty: \"หมด\", fault: \"ผิดปกติ\" };\nconst headers = { \"Content-Type\": \"application/json\" };\n\n// ปุ่มทดสอบ (ไม่ส่ง LINE)\nif (msg.sim) {\n    const di = { full: [1, 1, 1], normal: [1, 1, 0], low: [1, 0, 0], empty: [0, 0, 0], fault: [0, 1, 0] }[msg.sim] || [0, 0, 0];\n    node.status({ fill: \"blue\", shape: \"ring\", text: \"ทดสอบ \" + (TH[msg.sim] || msg.sim) });\n    return [{ payload: { tank: TANK, level: msg.sim, di1: di[0], di2: di[1], di3: di[2], test: true, notify: false }, headers }, null];\n}\n\nconst a = pick(msg, DI_EMPTY), b = pick(msg, DI_MID), c = pick(msg, DI_FULL);\nif (a === null || b === null || c === null) {\n    node.status({ fill: \"red\", shape: \"ring\", text: \"อ่านค่า DI ไม่ได้ – ดู debug 'DI เปลี่ยน'\" });\n    return [null, { payload: { error: \"อ่านรูปแบบค่า DI ไม่ออก\", raw: msg.payload } }];\n}\nconst r1 = INVERT ? !a : a, r2 = INVERT ? !b : b, r3 = INVERT ? !c : c;\nconst level = r1 && r2 && r3 ? \"full\" : r1 && r2 && !r3 ? \"normal\" : r1 && !r2 && !r3 ? \"low\" : !r1 && !r2 && !r3 ? \"empty\" : \"fault\";\n\nconst now = Date.now();\n// แจ้ง debug ทุกครั้งที่สัญญาณ Relay เปลี่ยน (ดูได้ทันที ไม่ต้องรอนิ่ง)\nlet chg = null;\nconst rawKey = [r1, r2, r3].map(v => v ? 1 : 0).join(\"\");\nif (context.get(\"rawKey\") !== rawKey) {\n    context.set(\"rawKey\", rawKey);\n    chg = { payload: { time: new Date().toLocaleTimeString(\"th-TH\"), R1_EMPTY_DI1: r1 ? \"ติด\" : \"ดับ\", R2_MID_DI2: r2 ? \"ติด\" : \"ดับ\",\n                       R3_FULL_DI3: r3 ? \"ติด\" : \"ดับ\", level: level + \" (\" + TH[level] + \")\", raw: msg.payload } };\n}\nif (context.get(\"cand\") !== level) { context.set(\"cand\", level); context.set(\"candAt\", now); }\nconst candAt = context.get(\"candAt\") || now;\nlet cur = context.get(\"level\"), send = false;\nif (level !== cur && now - candAt >= STABLE_MS) { cur = level; context.set(\"level\", cur); send = true; }\nif (!send && cur && now - (context.get(\"sentAt\") || 0) >= HEARTBEAT_MS) send = true;\n\nconst wait = level !== cur ? \" (รอนิ่ง \" + Math.max(0, Math.ceil((STABLE_MS - (now - candAt)) / 1000)) + \" วิ → \" + TH[level] + \")\" : \"\";\nconst on = v => v ? \"●\" : \"○\";\nnode.status({ fill: cur === \"full\" ? \"blue\" : cur === \"normal\" ? \"green\" : cur === \"low\" ? \"yellow\" : cur === \"empty\" ? \"red\" : \"grey\", shape: \"dot\",\n              text: (cur ? TH[cur] : \"เริ่มต้น\") + \" · R1\" + on(r1) + \" R2\" + on(r2) + \" R3\" + on(r3) + wait });\nif (!send) return [null, chg];\ncontext.set(\"sentAt\", now);\nreturn [{ payload: { tank: TANK, level: cur, di1: r1 ? 1 : 0, di2: r2 ? 1 : 0, di3: r3 ? 1 : 0 }, headers }, chg];\n",
+  "outputs": 2,
+  "timeout": 0,
+  "noerr": 0,
+  "initialize": "",
+  "finalize": "",
+  "libs": [],
+  "x": 530,
+  "y": 100,
+  "wires": [
+   [
+    "7fe4c4c628fa1682",
+    "347a07e9d928f156"
+   ],
+   [
+    "f9faf372117422c1"
+   ]
+  ]
+ },
+ {
+  "id": "7fe4c4c628fa1682",
+  "type": "http request",
+  "z": "fbb2ba42869c57f8",
+  "name": "POST WaterTank",
+  "method": "POST",
+  "ret": "obj",
+  "paytoqs": "ignore",
+  "url": "http://192.168.100.20/Dashboard/WaterTank.aspx",
+  "tls": "",
+  "persist": false,
+  "proxy": "",
+  "insecureHTTPParser": false,
+  "authType": "",
+  "senderr": false,
+  "headers": [],
+  "x": 740,
+  "y": 100,
+  "wires": [
+   [
+    "2038f0e6c56cd9da"
+   ]
+  ]
+ },
+ {
+  "id": "2038f0e6c56cd9da",
+  "type": "function",
+  "z": "fbb2ba42869c57f8",
+  "name": "ผลการส่ง",
+  "func": "// @ts-nocheck\nconst ok = msg.statusCode == 200;\nconst a = msg.payload && msg.payload.alerts && msg.payload.alerts.length ? \" · แจ้ง LINE: \" + msg.payload.alerts.join(\",\") : \"\";\nnode.status({ fill: ok ? \"green\" : \"red\", shape: \"dot\",\n              text: (ok ? \"ส่งแล้ว \" : \"ส่งไม่ได้ HTTP \" + msg.statusCode + \" \") + new Date().toLocaleTimeString(\"th-TH\") + a });\nmsg.payload = { ok: ok, http: msg.statusCode, reply: msg.payload };\nreturn msg;\n",
+  "outputs": 1,
+  "timeout": 0,
+  "noerr": 0,
+  "initialize": "",
+  "finalize": "",
+  "libs": [],
+  "x": 930,
+  "y": 100,
+  "wires": [
+   [
+    "9cdd372242b2c589"
+   ]
+  ]
+ },
+ {
+  "id": "9cdd372242b2c589",
+  "type": "debug",
+  "z": "fbb2ba42869c57f8",
+  "name": "ผลจากเว็บ",
+  "active": true,
+  "tosidebar": true,
+  "console": false,
+  "tostatus": false,
+  "complete": "payload",
+  "targetType": "msg",
+  "statusVal": "",
+  "statusType": "auto",
+  "x": 1110,
+  "y": 100,
+  "wires": []
+ },
+ {
+  "id": "d3229ea0c58d9ee0",
+  "type": "catch",
+  "z": "fbb2ba42869c57f8",
+  "name": "error",
+  "scope": [
+   "7fe4c4c628fa1682",
+   "b99260dd1fbc4fd6",
+   "2038f0e6c56cd9da"
+  ],
+  "uncaught": false,
+  "x": 730,
+  "y": 160,
+  "wires": [
+   [
+    "492cd61eac76470a"
+   ]
+  ]
+ },
+ {
+  "id": "492cd61eac76470a",
+  "type": "debug",
+  "z": "fbb2ba42869c57f8",
+  "name": "error",
+  "active": true,
+  "tosidebar": true,
+  "console": false,
+  "tostatus": true,
+  "complete": "error",
+  "targetType": "msg",
+  "statusVal": "error.message",
+  "statusType": "msg",
+  "x": 910,
+  "y": 160,
+  "wires": []
+ },
+ {
+  "id": "982914af684333d4",
+  "type": "inject",
+  "z": "fbb2ba42869c57f8",
+  "name": "ทดสอบ FULL (ไม่ส่ง LINE)",
+  "props": [
+   {
+    "p": "sim",
+    "v": "full",
+    "vt": "str"
+   }
+  ],
+  "repeat": "",
+  "crontab": "",
+  "once": false,
+  "onceDelay": "1",
+  "topic": "",
+  "x": 180,
+  "y": 240,
+  "wires": [
+   [
+    "b99260dd1fbc4fd6"
+   ]
+  ]
+ },
+ {
+  "id": "4c29064b7288b80e",
+  "type": "inject",
+  "z": "fbb2ba42869c57f8",
+  "name": "ทดสอบ Normal (ไม่ส่ง LINE)",
+  "props": [
+   {
+    "p": "sim",
+    "v": "normal",
+    "vt": "str"
+   }
+  ],
+  "repeat": "",
+  "crontab": "",
+  "once": false,
+  "onceDelay": "1",
+  "topic": "",
+  "x": 180,
+  "y": 280,
+  "wires": [
+   [
+    "b99260dd1fbc4fd6"
+   ]
+  ]
+ },
+ {
+  "id": "c350e1963b1ab6f9",
+  "type": "inject",
+  "z": "fbb2ba42869c57f8",
+  "name": "ทดสอบ ใกล้หมด (ไม่ส่ง LINE)",
+  "props": [
+   {
+    "p": "sim",
+    "v": "low",
+    "vt": "str"
+   }
+  ],
+  "repeat": "",
+  "crontab": "",
+  "once": false,
+  "onceDelay": "1",
+  "topic": "",
+  "x": 180,
+  "y": 320,
+  "wires": [
+   [
+    "b99260dd1fbc4fd6"
+   ]
+  ]
+ },
+ {
+  "id": "b3d5fa6ac2ea01e0",
+  "type": "inject",
+  "z": "fbb2ba42869c57f8",
+  "name": "ทดสอบ หมด (ไม่ส่ง LINE)",
+  "props": [
+   {
+    "p": "sim",
+    "v": "empty",
+    "vt": "str"
+   }
+  ],
+  "repeat": "",
+  "crontab": "",
+  "once": false,
+  "onceDelay": "1",
+  "topic": "",
+  "x": 180,
+  "y": 360,
+  "wires": [
+   [
+    "b99260dd1fbc4fd6"
+   ]
+  ]
+ },
+ {
+  "id": "897a4e27f81c786b",
+  "type": "inject",
+  "z": "fbb2ba42869c57f8",
+  "name": "ทดสอบ Relay ผิดปกติ",
+  "props": [
+   {
+    "p": "sim",
+    "v": "fault",
+    "vt": "str"
+   }
+  ],
+  "repeat": "",
+  "crontab": "",
+  "once": false,
+  "onceDelay": "1",
+  "topic": "",
+  "x": 180,
+  "y": 400,
+  "wires": [
+   [
+    "b99260dd1fbc4fd6"
+   ]
+  ]
+ },
+ {
+  "id": "f9faf372117422c1",
+  "type": "debug",
+  "z": "fbb2ba42869c57f8",
+  "name": "DI เปลี่ยน",
+  "active": true,
+  "tosidebar": true,
+  "console": false,
+  "tostatus": false,
+  "complete": "payload",
+  "targetType": "msg",
+  "statusVal": "",
+  "statusType": "auto",
+  "x": 740,
+  "y": 200,
+  "wires": []
+ },
+ {
+  "id": "347a07e9d928f156",
+  "type": "debug",
+  "z": "fbb2ba42869c57f8",
+  "name": "ส่งไปเว็บ",
+  "active": true,
+  "tosidebar": true,
+  "console": false,
+  "tostatus": false,
+  "complete": "payload",
+  "targetType": "msg",
+  "statusVal": "",
+  "statusType": "auto",
+  "x": 740,
+  "y": 50,
+  "wires": []
+ }
+]

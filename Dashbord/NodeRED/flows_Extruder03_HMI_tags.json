@@ -1,0 +1,126 @@
+[
+ {
+  "id": "c8cefdda7b655fb5",
+  "type": "tab",
+  "label": "Extruder03 เช็ค Tag HMI",
+  "disabled": false,
+  "info": "อ่านค่าตาม Tag บนจอ HMI (อ่านอย่างเดียว) เพื่อเทียบว่าแต่ละ D เก็บค่าแบบไหน"
+ },
+ {
+  "id": "b41f817a3d78c7f1",
+  "type": "comment",
+  "z": "c8cefdda7b655fb5",
+  "name": "กดปุ่ม 'อ่าน Tag' → ดู Debug แล้วเทียบกับตัวเลขบนจอ HMI ว่าตรงกับรูปแบบไหน (INT16 / /10 / DINT32 / REAL)",
+  "info": "",
+  "x": 470,
+  "y": 40,
+  "wires": []
+ },
+ {
+  "id": "25b28c0f982db32c",
+  "type": "inject",
+  "z": "c8cefdda7b655fb5",
+  "name": "อ่าน Tag (กด)",
+  "props": [
+   {
+    "p": "payload"
+   }
+  ],
+  "repeat": "",
+  "crontab": "",
+  "once": false,
+  "onceDelay": "1",
+  "topic": "",
+  "payload": "",
+  "payloadType": "date",
+  "x": 140,
+  "y": 100,
+  "wires": [
+   [
+    "d8407c27f59a08cd"
+   ]
+  ]
+ },
+ {
+  "id": "8e26605cad77e526",
+  "type": "inject",
+  "z": "c8cefdda7b655fb5",
+  "name": "อ่านซ้ำทุก 5 วิ (ปิดไว้)",
+  "props": [
+   {
+    "p": "payload"
+   }
+  ],
+  "repeat": "5",
+  "crontab": "",
+  "once": false,
+  "onceDelay": "1",
+  "topic": "",
+  "payload": "",
+  "payloadType": "date",
+  "x": 170,
+  "y": 150,
+  "wires": [
+   []
+  ],
+  "d": true
+ },
+ {
+  "id": "d8407c27f59a08cd",
+  "type": "function",
+  "z": "c8cefdda7b655fb5",
+  "name": "อ่าน Tag HMI (FINS)",
+  "func": "// @ts-nocheck\n// ===== ไล่เช็ค Tag บนจอ HMI Extruder03 (อ่านอย่างเดียว ไม่เขียนค่า) =====\n// อ่าน PLC Omron NJ ด้วย FINS UDP -> แสดงแต่ละ Tag หลายรูปแบบ ให้เทียบกับตัวเลขบนจอ HMI\nconst HOST = \"192.168.250.1\", DA1 = 1, SA1 = 50;     // SA1 = เลขท้าย IP กล่อง (192.168.250.50)\nconst SWAP = true;                                    // NJ เก็บ STRING byte ต่ำก่อน\n\n// Tag จากหน้าจอ HMI (DMxxxxx = D ใน PLC)\nconst TAGS = [\n    { name: \"VALVE SETTING\",          d: 100 },\n    { name: \"CUTTER SPEED\",           d: 102 },\n    { name: \"TEMP.\",                  d: 104 },\n    { name: \"WEIGHT (หัวตาราง)\",       d: 106 },\n    { name: \"THROTTLE PRESSURE\",      d: 108 },\n    { name: \"FINISHED QTY (Batch)\",   d: 160 },\n    { name: \"EXPECT COMPLETE TIME (Min)\", d: 170 },\n    { name: \"TOTAL QTY (ช่องเขียว)\",   d: 420 },\n    { name: \"QTY SETUP (ช่องเขียว)\",   d: 430 },\n    { name: \"TOTAL QTY (ช่องชมพู)\",    d: 442 },\n    { name: \"QTY SETUP (ช่องชมพู)\",    d: 452 },\n    { name: \"REAL WEIGHT (g) ข้อความ\", d: 554, str: 6 }\n];\n// ช่วงที่อ่าน (อ่านทีละก้อน ไม่กี่ครั้ง -> PLC/HMI ไม่หนัก)\nconst BLOCKS = [[0, 200], [400, 60], [540, 40]];\n\nlet S = context.get(\"S\");\nif (!S) {\n    const sock = dgram.createSocket(\"udp4\");\n    S = { sock, pending: null, sid: 0 };\n    sock.on(\"message\", r => { if (S.pending && r.length >= 14 && r[9] === S.sid) S.pending(null, r); });\n    sock.on(\"error\", e => S.pending && S.pending(\"socket \" + e.code));\n    sock.bind(0);\n    context.set(\"S\", S);\n}\nif (context.get(\"busy\")) return null;\ncontext.set(\"busy\", true);\n\nfunction readBlock(start, count) {\n    return new Promise(res => {\n        S.sid = (S.sid + 1) & 0xFF;\n        const req = Buffer.from([0x80, 0, 0x02, 0, DA1, 0, 0, SA1, 0, S.sid, 0x01, 0x01, 0x82,\n            (start >> 8) & 0xFF, start & 0xFF, 0, (count >> 8) & 0xFF, count & 0xFF]);\n        const t = setTimeout(() => S.pending && S.pending(\"timeout\"), 1000);\n        S.pending = (err, r) => {\n            clearTimeout(t); S.pending = null;\n            if (err) return res({ err });\n            const ec = r.readUInt16BE(12);\n            if (ec !== 0 && ec !== 0x0040) return res({ err: \"end code 0x\" + ec.toString(16) });\n            const w = []; for (let k = 0; k < count; k++) w.push(r.readUInt16BE(14 + k * 2));\n            res({ w });\n        };\n        S.sock.send(req, 9600, HOST, e => { if (e && S.pending) S.pending(\"send \" + e.code); });\n    });\n}\nconst ch = c => (c >= 32 && c < 127 ? String.fromCharCode(c) : \"·\");\nconst wstr = w => { let a = (w >> 8) & 0xFF, b = w & 0xFF; if (SWAP) [a, b] = [b, a]; return ch(a) + ch(b); };\n\n(async () => {\n    const mem = {}, errs = [];\n    for (const [s, n] of BLOCKS) {\n        const r = await readBlock(s, n);\n        if (r.err) errs.push(\"D\" + s + \"-\" + (s + n - 1) + \": \" + r.err);\n        else r.w.forEach((v, k) => mem[s + k] = v);\n    }\n    context.set(\"busy\", false);\n    if (errs.length && !Object.keys(mem).length) {\n        node.status({ fill: \"red\", shape: \"ring\", text: errs[0] });\n        node.send([{ payload: { error: errs } }, null]);\n        return;\n    }\n    const W = d => mem[d];\n    const out = {};\n    for (const t of TAGS) {\n        const lo = W(t.d), hi = W(t.d + 1);\n        if (lo === undefined) { out[t.name + \"  [D\" + t.d + \"]\"] = \"อ่านไม่ได้\"; continue; }\n        if (t.str) {\n            let s = \"\"; for (let k = 0; k < Math.ceil(t.str / 2) + 4; k++) s += wstr(W(t.d + k) || 0);\n            out[t.name + \"  [D\" + t.d + \"]\"] = { \"ข้อความ\": s.replace(/·/g, \" \").trim(), \"ข้อความ (D550 ทั้งก้อน)\": Array.from({ length: 8 }, (_, k) => wstr(W(550 + k) || 0)).join(\"\").replace(/·/g, \" \").trim() };\n            continue;\n        }\n        const b = Buffer.alloc(4); b.writeUInt16BE(hi || 0, 0); b.writeUInt16BE(lo, 2);\n        const i16 = lo > 32767 ? lo - 65536 : lo, i32 = b.readInt32BE(0), f = b.readFloatBE(0);\n        out[t.name + \"  [D\" + t.d + \"]\"] = {\n            \"INT16\": i16, \"INT16 /10\": i16 / 10,\n            [\"DINT32 (D\" + t.d + \"-\" + (t.d + 1) + \")\"]: i32, \"DINT32 /10\": i32 / 10,\n            \"REAL\": Math.abs(f) < 1e9 && Math.abs(f) > 1e-6 ? Math.round(f * 1000) / 1000 : (f === 0 ? 0 : \"-\"),\n            \"raw\": \"0x\" + lo.toString(16).padStart(4, \"0\") + \" 0x\" + (hi || 0).toString(16).padStart(4, \"0\")\n        };\n    }\n    // หา PRODUCTION NAME: ไล่หาข้อความ ASCII (>= 4 ตัว) ใน D0–D199\n    const strings = {};\n    let run = \"\", from = null;\n    for (let d = 0; d <= 200; d++) {\n        const s = d < 200 && W(d) !== undefined ? wstr(W(d)) : \"··\";\n        if (s !== \"··\" && s.replace(/·/g, \"\").length > 0 && /[A-Za-z0-9]/.test(s)) { if (from === null) from = d; run += s; }\n        else { const txt = run.replace(/·/g, \"\").trim(); if (from !== null && txt.length >= 4) strings[\"D\" + from + \"-D\" + (d - 1)] = txt; run = \"\"; from = null; }\n    }\n    node.status({ fill: errs.length ? \"yellow\" : \"green\", shape: \"dot\", text: \"อ่านแล้ว \" + new Date().toLocaleTimeString(\"th-TH\") + (errs.length ? \" · บางช่วงอ่านไม่ได้\" : \"\") });\n    node.send([{ payload: out }, { payload: { \"ข้อความที่เจอใน D0–D199 (หา PRODUCTION NAME)\": strings, error: errs.length ? errs : undefined } }]);\n})();\nreturn null;",
+  "outputs": 2,
+  "timeout": 0,
+  "noerr": 0,
+  "initialize": "",
+  "finalize": "const S = context.get('S'); if (S) { try { S.sock.close(); } catch (e) {} } context.set('S', null); context.set('busy', false);",
+  "libs": [
+   {
+    "var": "dgram",
+    "module": "dgram"
+   }
+  ],
+  "x": 390,
+  "y": 100,
+  "wires": [
+   [
+    "10a2e0694a48d550"
+   ],
+   [
+    "2752e4bfba53d90c"
+   ]
+  ]
+ },
+ {
+  "id": "10a2e0694a48d550",
+  "type": "debug",
+  "z": "c8cefdda7b655fb5",
+  "name": "ค่าแต่ละ Tag",
+  "active": true,
+  "tosidebar": true,
+  "console": false,
+  "tostatus": false,
+  "complete": "payload",
+  "targetType": "msg",
+  "x": 610,
+  "y": 80,
+  "wires": []
+ },
+ {
+  "id": "2752e4bfba53d90c",
+  "type": "debug",
+  "z": "c8cefdda7b655fb5",
+  "name": "หา PRODUCTION NAME",
+  "active": true,
+  "tosidebar": true,
+  "console": false,
+  "tostatus": false,
+  "complete": "payload",
+  "targetType": "msg",
+  "x": 630,
+  "y": 120,
+  "wires": []
+ }
+]

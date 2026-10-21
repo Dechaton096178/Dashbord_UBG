@@ -1,0 +1,74 @@
+[
+ {
+  "id": "a1b2c3d4e5f60000",
+  "type": "tab",
+  "label": "ทดสอบ PLC 192.168.0.101",
+  "disabled": false,
+  "info": "ทดสอบรูปแบบ protocol บน port 502 (ลบแท็บนี้ได้หลังใช้)"
+ },
+ {
+  "id": "a1b2c3d4e5f60001",
+  "type": "inject",
+  "name": "ทดสอบ 502",
+  "props": [
+   {
+    "p": "payload"
+   }
+  ],
+  "repeat": "",
+  "crontab": "",
+  "once": false,
+  "onceDelay": 0.1,
+  "topic": "",
+  "payload": "",
+  "payloadType": "str",
+  "x": 150,
+  "y": 80,
+  "wires": [
+   [
+    "a1b2c3d4e5f60002"
+   ]
+  ],
+  "z": "a1b2c3d4e5f60000"
+ },
+ {
+  "id": "a1b2c3d4e5f60002",
+  "type": "function",
+  "name": "ทดสอบ protocol port 502",
+  "func": "// ทดสอบ port 502 ของ 192.168.0.101 ด้วยหลายรูปแบบ frame (ต่อใหม่ทุกครั้ง)\nconst HOST = \"192.168.0.101\", PORT = 502;\nfunction mc3eBin(){const b=Buffer.alloc(21);b.writeUInt16LE(0x50,0);b[2]=0;b[3]=0xFF;b.writeUInt16LE(0x03FF,4);b[6]=0;b.writeUInt16LE(12,7);b.writeUInt16LE(0x10,9);b.writeUInt16LE(0x0401,11);b.writeUInt16LE(0,13);b.writeUIntLE(0,15,3);b[18]=0xA8;b.writeUInt16LE(1,19);return b;}\nfunction mc4eBin(){const b=Buffer.alloc(25);b.writeUInt16LE(0x54,0);b.writeUInt16LE(0x1234,2);b.writeUInt16LE(0,4);b[6]=0;b[7]=0xFF;b.writeUInt16LE(0x03FF,8);b[10]=0;b.writeUInt16LE(12,11);b.writeUInt16LE(0x10,13);b.writeUInt16LE(0x0401,15);b.writeUInt16LE(0,17);b.writeUIntLE(0,19,3);b[22]=0xA8;b.writeUInt16LE(1,23);return b;}\nconst mc3eAscii = Buffer.from(\"500000FF03FF000018001004010000D*0000000001\");\nconst mc1e = Buffer.from([0x01,0xFF,0x0A,0x00, 0x00,0x00,0x00,0x00, 0x20,0x44, 0x01,0x00]);\nconst mb = u => Buffer.from([0,1,0,0,0,6,u,3,0,0,0,1]);\nconst tests = [[\"connect only (no send)\",null],[\"Modbus unit 1\",mb(1)],[\"Modbus unit 0\",mb(0)],[\"Modbus unit 255\",mb(255)],[\"SLMP 3E binary\",mc3eBin()],[\"SLMP 4E binary\",mc4eBin()],[\"SLMP 3E ASCII\",mc3eAscii],[\"MC 1E (FX3U)\",mc1e]];\nfunction one(name, frame){return new Promise(res=>{const s=new net.Socket();const t0=Date.now();let data=Buffer.alloc(0),done=false;\n const end=why=>{if(done)return;done=true;s.destroy();res(name+\" -> \"+why+\" @\"+(Date.now()-t0)+\"ms\"+(data.length?\" rx=\"+data.toString(\"hex\").slice(0,80)+(data[0]>=0x30&&data[0]<0x7f?\" (\"+data.toString(\"latin1\").slice(0,40)+\")\":\"\"):\"\"));};\n s.setTimeout(3000);s.on(\"data\",d=>{data=Buffer.concat([data,d]);setTimeout(()=>end(\"reply\"),300);});\n s.on(\"timeout\",()=>end(frame?\"no reply (timeout)\":\"still open after 3s\"));s.on(\"error\",e=>end(\"error \"+e.code));s.on(\"close\",()=>end(\"closed by PLC\"));\n s.connect(PORT,HOST,()=>{if(frame)s.write(frame);});});}\n(async()=>{const out=[];for(const [n,f] of tests){node.status({fill:\"blue\",shape:\"ring\",text:n});out.push(await one(n,f));await new Promise(r=>setTimeout(r,500));}\n for(const p of [5562]){out.push(await new Promise(res=>{const s=new net.Socket();const t0=Date.now();s.setTimeout(2000);s.on(\"connect\",()=>{s.write(mc3eBin());});s.on(\"data\",d=>{s.destroy();res(p+\" SLMP3E rx=\"+d.toString(\"hex\").slice(0,60));});s.on(\"timeout\",()=>{s.destroy();res(p+\" no reply\");});s.on(\"error\",e=>res(p+\" err \"+e.code));s.on(\"close\",()=>res(p+\" closed @\"+(Date.now()-t0)+\"ms\"));s.connect(p,HOST);}));}\n node.status({fill:\"green\",shape:\"dot\",text:\"เสร็จ ดู Debug\"});node.send({topic:\"ทดสอบ port 502 @\"+HOST,payload:out});})();\nreturn null;\n",
+  "outputs": 1,
+  "timeout": 0,
+  "noerr": 0,
+  "initialize": "",
+  "finalize": "",
+  "libs": [
+   {
+    "var": "net",
+    "module": "net"
+   }
+  ],
+  "x": 360,
+  "y": 80,
+  "wires": [
+   [
+    "a1b2c3d4e5f60003"
+   ]
+  ],
+  "z": "a1b2c3d4e5f60000"
+ },
+ {
+  "id": "a1b2c3d4e5f60003",
+  "type": "debug",
+  "name": "ผลทดสอบ 502",
+  "active": true,
+  "tosidebar": true,
+  "console": false,
+  "tostatus": false,
+  "complete": "true",
+  "targetType": "full",
+  "x": 580,
+  "y": 80,
+  "wires": [],
+  "z": "a1b2c3d4e5f60000"
+ }
+]

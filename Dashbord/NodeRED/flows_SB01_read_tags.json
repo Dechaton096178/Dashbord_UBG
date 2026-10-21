@@ -1,0 +1,177 @@
+[
+  {
+    "id": "9c5a669aed79567e",
+    "type": "tab",
+    "label": "SB01 อ่าน Tag",
+    "disabled": false,
+    "env": [],
+    "info": "Seambuffing 1 PLC 192.168.0.102:502 (MC Protocol 3E Binary)\nใช้เฉพาะ node มาตรฐานของ Node-RED (ไม่ต้องติดตั้ง palette)"
+  },
+  {
+    "id": "2fbc156139b3ae54",
+    "type": "comment",
+    "z": "9c5a669aed79567e",
+    "name": "SB01 (192.168.0.102:502): D322 ยอดรวม | D60 NG | D330 定位率 | D300 CCD異常 | D320 CCD OK | D0 สถานะ",
+    "info": "",
+    "x": 400,
+    "y": 40,
+    "wires": []
+  },
+  {
+    "id": "91c22c21c8b484d0",
+    "type": "inject",
+    "z": "9c5a669aed79567e",
+    "name": "ทุก 2 วินาที",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "2",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "2",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 130,
+    "y": 100,
+    "wires": [
+      [
+        "e8834d4cf199d0b3"
+      ]
+    ]
+  },
+  {
+    "id": "e8834d4cf199d0b3",
+    "type": "function",
+    "z": "9c5a669aed79567e",
+    "name": "คำสั่งอ่าน D0-D331",
+    "func": "// สร้างคำสั่ง MC Protocol 3E (Binary) อ่าน D0 ถึง D331 ในครั้งเดียว\nconst START = 0, POINTS = 332;          // D0..D331 ครอบคลุม D0, D60, D300, D320, D322, D330\nconst b = Buffer.alloc(21);\nb.writeUInt16LE(0x0050, 0);   // subheader\nb[2] = 0x00;                  // network no.\nb[3] = 0xFF;                  // PC no.\nb.writeUInt16LE(0x03FF, 4);   // I/O no.\nb[6] = 0x00;                  // station no.\nb.writeUInt16LE(12, 7);       // data length\nb.writeUInt16LE(0x0010, 9);   // timer (x250ms)\nb.writeUInt16LE(0x0401, 11);  // command: batch read\nb.writeUInt16LE(0x0000, 13);  // subcommand: word\nb.writeUIntLE(START, 15, 3);  // device no.\nb[18] = 0xA8;                 // device code: D\nb.writeUInt16LE(POINTS, 19);  // points\nflow.set(\"sb01_sent\", Date.now());\nreturn { payload: b, start: START, points: POINTS };",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 320,
+    "y": 100,
+    "wires": [
+      [
+        "198efba0551b71a3"
+      ]
+    ]
+  },
+  {
+    "id": "198efba0551b71a3",
+    "type": "tcp request",
+    "z": "9c5a669aed79567e",
+    "name": "PLC SB01 192.168.0.102:502",
+    "server": "192.168.0.102",
+    "port": "502",
+    "out": "time",
+    "ret": "buffer",
+    "splitc": "800",
+    "newline": "",
+    "trim": false,
+    "tls": "",
+    "x": 560,
+    "y": 100,
+    "wires": [
+      [
+        "291926dcffee81ea"
+      ]
+    ]
+  },
+  {
+    "id": "291926dcffee81ea",
+    "type": "function",
+    "z": "9c5a669aed79567e",
+    "name": "ถอดค่า",
+    "func": "// ถอดคำตอบ MC Protocol แล้วเลือกค่าที่ต้องการ\nconst buf = msg.payload;\nif (!Buffer.isBuffer(buf) || buf.length < 11) { node.status({fill:\"red\",shape:\"ring\",text:\"ไม่มีคำตอบจาก PLC\"}); return [null, msg]; }\nconst end = buf.readUInt16LE(9);\nif (buf.readUInt16LE(0) !== 0x00D0 || end !== 0) {\n    node.status({ fill: \"red\", shape: \"ring\", text: \"PLC error 0x\" + end.toString(16) });\n    return [null, msg];\n}\nconst w = i => buf.readUInt16LE(11 + i * 2);                 // D(i)\nconst d32 = i => w(i) + w(i + 1) * 65536;                    // BIN32: word ต่ำก่อน\nif (buf.length < 11 + 332 * 2) { node.status({fill:\"yellow\",shape:\"ring\",text:\"ข้อมูลไม่ครบ \" + buf.length}); return [null, msg]; }\n\nconst total = d32(322), ng = w(60);\nconst out = {\n    total:  total,                       // D322 入球總數 ยอดรวม (BIN32)\n    ng:     ng,                          // D60  不良數量 NG (BIN16)\n    ok:     Math.max(0, total - ng),     // คำนวณ = ยอดรวม - NG\n    rate:   d32(330) / 10,               // D330 定位率 % (BIN32 /10)\n    ccdNg:  d32(300),                    // D300 CCD 檢測異常 (BIN32)\n    ccdOk:  w(320),                      // D320 CCD 檢測 OK (BIN16)\n    status: w(0),                        // D0   1=OP 2=EG 3=SV\n    statusText: { 1: \"OP\", 2: \"EG\", 3: \"SV\" }[w(0)] || (\"?\" + w(0)),\n    time: new Date().toLocaleString(\"en-GB\")\n};\nflow.set(\"sb01\", out);\nnode.status({ fill: \"green\", shape: \"dot\", text: out.statusText + \" | Total \" + out.total + \" NG \" + out.ng + \" | \" + out.rate + \"%\" });\nreturn [{ topic: \"SB01\", payload: out }, null];",
+    "outputs": 2,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 770,
+    "y": 100,
+    "wires": [
+      [
+        "577abe3bce4fab07"
+      ],
+      [
+        "d20cda7b1a8b7167"
+      ]
+    ]
+  },
+  {
+    "id": "577abe3bce4fab07",
+    "type": "debug",
+    "z": "9c5a669aed79567e",
+    "name": "SB01 ค่าล่าสุด",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 950,
+    "y": 80,
+    "wires": []
+  },
+  {
+    "id": "d20cda7b1a8b7167",
+    "type": "debug",
+    "z": "9c5a669aed79567e",
+    "name": "คำตอบผิดปกติ (raw)",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 970,
+    "y": 120,
+    "wires": []
+  },
+  {
+    "id": "04b7f2c286ac8f4e",
+    "type": "catch",
+    "z": "9c5a669aed79567e",
+    "name": "error การเชื่อมต่อ",
+    "scope": [
+      "198efba0551b71a3"
+    ],
+    "uncaught": false,
+    "x": 560,
+    "y": 170,
+    "wires": [
+      [
+        "bcc8a411d86c6720"
+      ]
+    ]
+  },
+  {
+    "id": "bcc8a411d86c6720",
+    "type": "debug",
+    "z": "9c5a669aed79567e",
+    "name": "TCP error",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": true,
+    "complete": "error.message",
+    "targetType": "msg",
+    "statusVal": "error.message",
+    "statusType": "msg",
+    "x": 760,
+    "y": 170,
+    "wires": []
+  }
+]

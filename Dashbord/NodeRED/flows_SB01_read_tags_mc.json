@@ -1,0 +1,174 @@
+[
+  {
+    "id": "83421548002a78f4",
+    "type": "tab",
+    "label": "SB01 อ่าน Tag (MC)",
+    "disabled": false,
+    "env": [],
+    "info": "ใช้กับ Node-RED ที่มี node-red-contrib-mcprotocol-ind และต่อวง 192.168.0.x ได้"
+  },
+  {
+    "id": "595c0a7f00953106",
+    "type": "Ind MC Protocol Connection",
+    "name": "SB01 PLC 192.168.0.102",
+    "host": "192.168.0.102",
+    "port": "502",
+    "protocol": "TCP",
+    "frame": "3E",
+    "plcType": "Q",
+    "ascii": false,
+    "PLCStation": "",
+    "PCStation": "",
+    "PLCModuleNo": "",
+    "network": "",
+    "octalInputOutput": false,
+    "timeout": 3000,
+    "autoConnect": true
+  },
+  {
+    "id": "5cd9019b979ea8d0",
+    "type": "comment",
+    "z": "83421548002a78f4",
+    "name": "SB01: D322 ยอดรวม | D60 NG | D330 定位率 | D300 CCD異常 | D320 CCD OK | D0 สถานะ",
+    "info": "",
+    "x": 360,
+    "y": 40,
+    "wires": []
+  },
+  {
+    "id": "1695e1ba3e52cd5d",
+    "type": "inject",
+    "z": "83421548002a78f4",
+    "name": "ทุก 3 วินาที",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "3",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "2",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 130,
+    "y": 100,
+    "wires": [
+      [
+        "a99ed2441bc5984f"
+      ]
+    ]
+  },
+  {
+    "id": "a99ed2441bc5984f",
+    "type": "function",
+    "z": "83421548002a78f4",
+    "name": "D0,332",
+    "func": "// อ่าน D0..D331 ครั้งเดียว (ครอบคลุม D0, D60, D300, D320, D322, D330)\nreturn { address: \"D0,332\" };",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 280,
+    "y": 100,
+    "wires": [
+      [
+        "1c03b913ffed153b"
+      ]
+    ]
+  },
+  {
+    "id": "1c03b913ffed153b",
+    "type": "Ind MC Read",
+    "z": "83421548002a78f4",
+    "name": "อ่าน PLC SB01",
+    "topic": "",
+    "connection": "595c0a7f00953106",
+    "address": "address",
+    "addressType": "msg",
+    "outputFormat": 0,
+    "errorHandling": "throw",
+    "outputs": 1,
+    "x": 450,
+    "y": 100,
+    "wires": [
+      [
+        "af24d2ce22db235f"
+      ]
+    ]
+  },
+  {
+    "id": "af24d2ce22db235f",
+    "type": "function",
+    "z": "83421548002a78f4",
+    "name": "ถอดค่า",
+    "func": "function vals(p) {\n    if (Array.isArray(p)) return p;\n    if (p && typeof p === \"object\") {\n        if (p.value !== undefined) return vals(p.value);\n        if (p.data !== undefined) return vals(p.data);\n        const k = Object.keys(p);\n        if (k.length === 1) return vals(p[k[0]]);\n        const num = s => { const m = String(s).match(/(\\d+)$/); return m ? +m[1] : 0; };\n        return k.sort((a, b) => num(a) - num(b)).map(x => p[x]);\n    }\n    return [p];\n}\nconst v = vals(msg.payload).map(x => Number(x) & 0xFFFF);\nif (v.length < 332) { node.status({fill:\"yellow\",shape:\"ring\",text:\"ได้ \" + v.length + \" ค่า\"}); node.warn(msg.payload); return null; }\nconst d32 = i => v[i] + v[i + 1] * 65536;\nconst total = d32(322), ng = v[60];\nconst out = {\n    total, ng, ok: Math.max(0, total - ng),\n    rate: d32(330) / 10, ccdNg: d32(300), ccdOk: v[320],\n    status: v[0], statusText: { 1: \"OP\", 2: \"EG\", 3: \"SV\" }[v[0]] || (\"?\" + v[0]),\n    time: new Date().toLocaleString(\"en-GB\")\n};\nflow.set(\"sb01\", out);\nnode.status({ fill: \"green\", shape: \"dot\", text: out.statusText + \" | Total \" + total + \" NG \" + ng + \" | \" + out.rate + \"%\" });\nreturn { topic: \"SB01\", payload: out };",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 620,
+    "y": 100,
+    "wires": [
+      [
+        "720e0158c0bb9d1f"
+      ]
+    ]
+  },
+  {
+    "id": "720e0158c0bb9d1f",
+    "type": "debug",
+    "z": "83421548002a78f4",
+    "name": "SB01 ค่าล่าสุด",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 800,
+    "y": 100,
+    "wires": []
+  },
+  {
+    "id": "70d5ce56b49bfbba",
+    "type": "catch",
+    "z": "83421548002a78f4",
+    "name": "error อ่าน PLC",
+    "scope": [
+      "1c03b913ffed153b"
+    ],
+    "uncaught": false,
+    "x": 450,
+    "y": 160,
+    "wires": [
+      [
+        "241adcbf127ca4ac"
+      ]
+    ]
+  },
+  {
+    "id": "241adcbf127ca4ac",
+    "type": "debug",
+    "z": "83421548002a78f4",
+    "name": "PLC error",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": true,
+    "complete": "error.message",
+    "targetType": "msg",
+    "statusVal": "error.message",
+    "statusType": "msg",
+    "x": 640,
+    "y": 160,
+    "wires": []
+  }
+]

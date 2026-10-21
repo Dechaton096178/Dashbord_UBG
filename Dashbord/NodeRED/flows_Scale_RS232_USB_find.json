@@ -1,0 +1,304 @@
+[
+  {
+    "id": "5ca1e00000000001",
+    "type": "tab",
+    "label": "Scale RS232 (USB) หาค่า",
+    "disabled": false,
+    "info": "① หาพอร์ต → ② ลองทุก Baud → แก้ค่าใน 'ตั้งค่าพอร์ต' → Deploy → ③ เริ่มอ่าน"
+  },
+  {
+    "id": "5ca1e00000000001",
+    "type": "comment",
+    "z": "5ca1e00000000001",
+    "name": "① หาพอร์ต USB  →  ② ลองทุก Baud  →  แก้ค่าใน 'ตั้งค่าพอร์ต' แล้ว Deploy  →  ③ เริ่มอ่าน (อ่านอย่างเดียว ไม่ส่งข้อมูลให้เครื่องชั่ง/PLC)",
+    "x": 470,
+    "y": 40,
+    "wires": []
+  },
+  {
+    "id": "5ca1e00000000002",
+    "type": "inject",
+    "z": "5ca1e00000000001",
+    "name": "ตั้งค่าตอน Deploy",
+    "props": [],
+    "repeat": "",
+    "once": true,
+    "onceDelay": 0.5,
+    "x": 150,
+    "y": 90,
+    "wires": [
+      [
+        "5ca1e00000000003"
+      ]
+    ]
+  },
+  {
+    "id": "5ca1e00000000003",
+    "type": "function",
+    "z": "5ca1e00000000001",
+    "name": "ตั้งค่าพอร์ต",
+    "func": "// ===== ตั้งค่าพอร์ตเครื่องชั่ง (แก้ตรงนี้แล้ว Deploy) =====\nflow.set(\"sc_dev\",  \"/dev/ttyUSB0\");   // พอร์ตของสาย USB-RS232 (ดูจากปุ่ม ①)\nflow.set(\"sc_baud\", 9600);             // Baud rate (หาได้จากปุ่ม ②)\nflow.set(\"sc_fmt\",  \"cs8 -cstopb -parenb\");   // 8N1 (ถ้า 7E1 ใช้ \"cs7 -cstopb parenb -parodd\")\nnode.status({ fill: \"green\", shape: \"dot\", text: flow.get(\"sc_dev\") + \" @ \" + flow.get(\"sc_baud\") });\nreturn null;",
+    "outputs": 1,
+    "x": 360,
+    "y": 90,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "5ca1e00000000004",
+    "type": "inject",
+    "z": "5ca1e00000000001",
+    "name": "① หาพอร์ต USB",
+    "props": [],
+    "repeat": "",
+    "once": false,
+    "x": 140,
+    "y": 150,
+    "wires": [
+      [
+        "5ca1e00000000005"
+      ]
+    ]
+  },
+  {
+    "id": "5ca1e00000000005",
+    "type": "exec",
+    "z": "5ca1e00000000001",
+    "command": "bash -c 'ls -l /dev/ttyUSB* /dev/ttyACM* 2>&1; echo; ls -l /dev/serial/by-id 2>&1; echo; id; echo; dmesg 2>/dev/null | grep -iE \"ttyUSB|pl2303|ftdi|ch34|cp210\" | tail -6'",
+    "addpay": "",
+    "append": "",
+    "useSpawn": "false",
+    "timer": "10",
+    "winHide": false,
+    "oldrc": false,
+    "name": "ls /dev/ttyUSB*",
+    "x": 360,
+    "y": 150,
+    "wires": [
+      [
+        "5ca1e00000000006"
+      ],
+      [
+        "5ca1e00000000006"
+      ],
+      []
+    ]
+  },
+  {
+    "id": "5ca1e00000000006",
+    "type": "debug",
+    "z": "5ca1e00000000001",
+    "name": "พอร์ตที่เจอ",
+    "active": true,
+    "tosidebar": true,
+    "complete": "payload",
+    "targetType": "msg",
+    "x": 590,
+    "y": 150,
+    "wires": []
+  },
+  {
+    "id": "5ca1e00000000007",
+    "type": "inject",
+    "z": "5ca1e00000000001",
+    "name": "② ลองทุก Baud",
+    "props": [],
+    "repeat": "",
+    "once": false,
+    "x": 140,
+    "y": 210,
+    "wires": [
+      [
+        "5ca1e00000000008"
+      ]
+    ]
+  },
+  {
+    "id": "5ca1e00000000008",
+    "type": "function",
+    "z": "5ca1e00000000001",
+    "name": "สร้างคำสั่งลอง Baud",
+    "func": "// ลองอ่านทีละ Baud rate ครั้งละ 2 วินาที (อ่านอย่างเดียว ไม่ส่งอะไรออกไป)\n// ระหว่างนี้ให้วางของบนเครื่องชั่ง / กดปุ่ม Print ที่เครื่องชั่ง เผื่อเครื่องชั่งส่งเฉพาะตอนกด\nconst dev = flow.get(\"sc_dev\") || \"/dev/ttyUSB0\";\nconst bauds = [9600, 4800, 2400, 1200, 19200, 38400];\nconst fmts = [[\"8N1\", \"cs8 -cstopb -parenb\"], [\"7E1\", \"cs7 -cstopb parenb -parodd\"]];\nlet s = \"\";\nfor (const [fn, f] of fmts) for (const b of bauds)\n    s += `stty -F ${dev} ${b} ${f} raw -echo 2>&1 && echo \"=== ${b} ${fn} ===\" && (timeout 2 cat ${dev} | head -c 80 | od -An -c | head -3); `;\nmsg.payload = \"'\" + s + \"'\";\nnode.status({ fill: \"blue\", shape: \"ring\", text: \"กำลังลอง \" + bauds.length * fmts.length + \" แบบ (~25 วิ)…\" });\nreturn msg;",
+    "outputs": 1,
+    "x": 350,
+    "y": 210,
+    "wires": [
+      [
+        "5ca1e00000000009"
+      ]
+    ]
+  },
+  {
+    "id": "5ca1e00000000009",
+    "type": "exec",
+    "z": "5ca1e00000000001",
+    "command": "bash -c",
+    "addpay": "payload",
+    "append": "",
+    "useSpawn": "false",
+    "timer": "60",
+    "winHide": false,
+    "oldrc": false,
+    "name": "ลองอ่าน",
+    "x": 540,
+    "y": 210,
+    "wires": [
+      [
+        "5ca1e0000000000a"
+      ],
+      [
+        "5ca1e0000000000a"
+      ],
+      []
+    ]
+  },
+  {
+    "id": "5ca1e0000000000a",
+    "type": "function",
+    "z": "5ca1e00000000001",
+    "name": "สรุปผล",
+    "func": "// สรุปผล: Baud ที่อ่านแล้วเป็นตัวเลข/ตัวอักษรอ่านออก = ค่าที่ถูก\nconst out = String(msg.payload || \"\");\nconst blocks = out.split(\"=== \").filter(Boolean).map(b => {\n    const nl = b.indexOf(\"\\n\"); const head = b.slice(0, nl).replace(\" ===\", \"\").trim(); const body = b.slice(nl + 1).trim();\n    const txt = body.replace(/\\s+/g, \" \");\n    const readable = (txt.match(/[0-9.+\\-gGkKsStT]/g) || []).length;\n    return { setting: head, readable, sample: txt.slice(0, 160) || \"(ไม่มีข้อมูล)\" };\n});\nblocks.sort((a, b) => b.readable - a.readable);\nnode.status({ fill: blocks[0] && blocks[0].readable > 10 ? \"green\" : \"yellow\", shape: \"dot\", text: blocks[0] ? \"น่าจะเป็น \" + blocks[0].setting : \"ไม่มีข้อมูล\" });\nmsg.payload = { \"น่าจะเป็น\": blocks[0] ? blocks[0].setting : null, \"ผลทั้งหมด (เรียงจากอ่านออกมากสุด)\": blocks, raw_stderr: msg.error || undefined };\nreturn msg;",
+    "outputs": 1,
+    "x": 690,
+    "y": 210,
+    "wires": [
+      [
+        "5ca1e0000000000b"
+      ]
+    ]
+  },
+  {
+    "id": "5ca1e0000000000b",
+    "type": "debug",
+    "z": "5ca1e00000000001",
+    "name": "ผลลอง Baud",
+    "active": true,
+    "tosidebar": true,
+    "complete": "payload",
+    "targetType": "msg",
+    "x": 860,
+    "y": 210,
+    "wires": []
+  },
+  {
+    "id": "5ca1e0000000000c",
+    "type": "inject",
+    "z": "5ca1e00000000001",
+    "name": "③ เริ่มอ่าน",
+    "props": [],
+    "repeat": "",
+    "once": false,
+    "x": 130,
+    "y": 290,
+    "wires": [
+      [
+        "5ca1e0000000000d"
+      ]
+    ]
+  },
+  {
+    "id": "5ca1e0000000000d",
+    "type": "function",
+    "z": "5ca1e00000000001",
+    "name": "คำสั่งอ่านต่อเนื่อง",
+    "func": "// เริ่มอ่านต่อเนื่อง ด้วยค่าที่ตั้งไว้ (ไม่ต้องลง package เพิ่ม)\nconst dev = flow.get(\"sc_dev\"), baud = flow.get(\"sc_baud\"), f = flow.get(\"sc_fmt\");\nmsg.payload = \"'stty -F \" + dev + \" \" + baud + \" \" + f + \" raw -echo && exec cat \" + dev + \"'\";\nnode.status({ fill: \"green\", shape: \"dot\", text: \"อ่าน \" + dev + \" @ \" + baud });\nreturn msg;",
+    "outputs": 1,
+    "x": 330,
+    "y": 290,
+    "wires": [
+      [
+        "5ca1e0000000000f"
+      ]
+    ]
+  },
+  {
+    "id": "5ca1e0000000000e",
+    "type": "inject",
+    "z": "5ca1e00000000001",
+    "name": "■ หยุดอ่าน",
+    "props": [
+      {
+        "p": "kill",
+        "v": "SIGTERM",
+        "vt": "str"
+      }
+    ],
+    "repeat": "",
+    "once": false,
+    "x": 130,
+    "y": 340,
+    "wires": [
+      [
+        "5ca1e0000000000f"
+      ]
+    ]
+  },
+  {
+    "id": "5ca1e0000000000f",
+    "type": "exec",
+    "z": "5ca1e00000000001",
+    "command": "sh -c",
+    "addpay": "payload",
+    "append": "",
+    "useSpawn": "true",
+    "timer": "",
+    "winHide": false,
+    "oldrc": false,
+    "name": "อ่านพอร์ต (ต่อเนื่อง)",
+    "x": 540,
+    "y": 300,
+    "wires": [
+      [
+        "5ca1e00000000010"
+      ],
+      [
+        "5ca1e00000000012"
+      ],
+      [
+        "5ca1e00000000012"
+      ]
+    ]
+  },
+  {
+    "id": "5ca1e00000000010",
+    "type": "function",
+    "z": "5ca1e00000000001",
+    "name": "แยกบรรทัด + น้ำหนัก",
+    "func": "// รวมข้อมูลเป็นบรรทัด แล้วลองแยกน้ำหนัก (ส่งออกเฉพาะตอนค่าเปลี่ยน หรือทุก 2 วิ)\nlet buf = (context.get(\"buf\") || \"\") + (Buffer.isBuffer(msg.payload) ? msg.payload.toString(\"latin1\") : String(msg.payload));\nconst parts = buf.split(/\\r\\n|\\r|\\n/); buf = parts.pop(); if (buf.length > 500) buf = buf.slice(-200);\ncontext.set(\"buf\", buf);\nfor (const raw of parts) {\n    const line = raw.replace(/[\\x00-\\x1f]/g, \"\").trim();\n    if (!line) continue;\n    const m = line.match(/([+-])?\\s*(\\d+(?:\\.\\d+)?)\\s*(kg|g|lb|ct|pcs)?/i);\n    const w = m ? parseFloat((m[1] === \"-\" ? \"-\" : \"\") + m[2]) : null;\n    const stable = /\\bST\\b|^S\\s|stable/i.test(line) ? true : /\\bUS\\b|unstable/i.test(line) ? false : null;\n    const last = context.get(\"last\"), now = Date.now();\n    node.status({ fill: w === null ? \"yellow\" : \"green\", shape: \"dot\", text: line.slice(0, 40) });\n    if (line === last && now - (context.get(\"t\") || 0) < 2000) continue;\n    context.set(\"last\", line); context.set(\"t\", now);\n    node.send({ payload: { \"ข้อความ\": line, hex: Buffer.from(raw, \"latin1\").toString(\"hex\").match(/../g).join(\" \"),\n                           \"น้ำหนักที่แยกได้\": w, \"หน่วย\": m && m[3] || \"\", \"นิ่ง\": stable, time: new Date().toLocaleTimeString(\"th-TH\") } });\n}\nreturn null;",
+    "outputs": 1,
+    "x": 760,
+    "y": 290,
+    "wires": [
+      [
+        "5ca1e00000000011"
+      ]
+    ]
+  },
+  {
+    "id": "5ca1e00000000011",
+    "type": "debug",
+    "z": "5ca1e00000000001",
+    "name": "ข้อความจากเครื่องชั่ง",
+    "active": true,
+    "tosidebar": true,
+    "complete": "payload",
+    "targetType": "msg",
+    "x": 990,
+    "y": 290,
+    "wires": []
+  },
+  {
+    "id": "5ca1e00000000012",
+    "type": "debug",
+    "z": "5ca1e00000000001",
+    "name": "error / สิ้นสุด",
+    "active": true,
+    "tosidebar": true,
+    "complete": "payload",
+    "targetType": "msg",
+    "x": 760,
+    "y": 350,
+    "wires": []
+  }
+]

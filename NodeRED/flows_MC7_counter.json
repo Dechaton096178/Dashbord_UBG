@@ -1,0 +1,444 @@
+[
+  {
+    "id": "6056513676c4237e",
+    "type": "tab",
+    "label": "MC7 Counter → Dashboard",
+    "disabled": false,
+    "info": "Flow ใหม่ MC7 ส่งข้อมูล Counter ไป http://192.168.100.20/Dashboard/CounterMachine.aspx\nมีการเชื่อมต่อ Modbus ของตัวเอง (MC7 HMI) ไม่แตะ flow เดิม\nก่อน Deploy: ดับเบิลคลิก node อ่าน Modbus -> แก้ IP ของ HMI MC7 ใน Server\nเครื่อง: UB-MC-PV-2-7",
+    "env": []
+  },
+  {
+    "id": "c61fbbf6e6bbf521",
+    "type": "comment",
+    "z": "6056513676c4237e",
+    "name": "อ่าน HMI MC7 → ส่ง JSON ไป CounterMachine.aspx ทุก 5 วินาที (ไม่กระทบ Flow 1)",
+    "info": "",
+    "x": 330,
+    "y": 20,
+    "wires": []
+  },
+  {
+    "id": "3d07e7a7a8cbeaf7",
+    "type": "modbus-read",
+    "z": "6056513676c4237e",
+    "name": "MC7 Cav/Target/Shot/Status 32879-32884",
+    "topic": "counter",
+    "showStatusActivities": false,
+    "logIOActivities": false,
+    "showErrors": false,
+    "showWarnings": true,
+    "unitid": "1",
+    "dataType": "HoldingRegister",
+    "adr": "32878",
+    "quantity": "6",
+    "rate": "2",
+    "rateUnit": "s",
+    "delayOnStart": false,
+    "enableDeformedMessages": false,
+    "startDelayTime": "",
+    "server": "6c52dc0ccd5184a5",
+    "useIOFile": false,
+    "ioFile": "",
+    "useIOForPayload": false,
+    "emptyMsgOnFail": false,
+    "x": 190,
+    "y": 140,
+    "wires": [
+      [
+        "a04058a54cb482fc"
+      ],
+      []
+    ]
+  },
+  {
+    "id": "0aa1a838e4590f1c",
+    "type": "modbus-read",
+    "z": "6056513676c4237e",
+    "name": "MC7 Cycle Time 32970",
+    "topic": "",
+    "showStatusActivities": false,
+    "logIOActivities": false,
+    "showErrors": false,
+    "showWarnings": true,
+    "unitid": "1",
+    "dataType": "HoldingRegister",
+    "adr": "32969",
+    "quantity": "1",
+    "rate": "2",
+    "rateUnit": "s",
+    "delayOnStart": false,
+    "enableDeformedMessages": false,
+    "startDelayTime": "",
+    "server": "6c52dc0ccd5184a5",
+    "useIOFile": false,
+    "ioFile": "",
+    "useIOForPayload": false,
+    "emptyMsgOnFail": false,
+    "x": 170,
+    "y": 220,
+    "wires": [
+      [
+        "f98af1b2b2abfcde"
+      ],
+      []
+    ]
+  },
+  {
+    "id": "a04058a54cb482fc",
+    "type": "function",
+    "z": "6056513676c4237e",
+    "name": "decode HMI data",
+    "func": "// รับจาก 3 node อ่าน แยกตาม msg.topic: operator | times | counter\n// ตั้งค่าการถอดรหัส (เปลี่ยนได้หลังเทียบกับหน้าจอ HMI)\nconst WORD_SWAP = true;      // ค่า 32-bit: HMI นี้เก็บ low word ก่อน (ยืนยันจาก FUXA: 32882 = ค่าจริง)\nconst BYTE_SWAP = false;     // ตัวอักษร Operator: false = high byte ก่อน\nconst TIME_MODE = \"bytes\";   // \"bytes\" | \"bcd\" | \"dec\"\n\nconst v = Array.isArray(msg.payload) ? msg.payload\n        : (msg.payload && Array.isArray(msg.payload.data)) ? msg.payload.data : [];\nconst u32 = (a, b) => WORD_SWAP ? (b * 65536 + a) : (a * 65536 + b);\n\nfunction chars(words) {\n    let s = \"\";\n    for (const w of words) {\n        const hi = (w >> 8) & 255, lo = w & 255;\n        for (const c of (BYTE_SWAP ? [lo, hi] : [hi, lo])) {\n            if (c === 0) return s.trim();\n            if (c >= 32 && c <= 126) s += String.fromCharCode(c);\n        }\n    }\n    return s.trim();\n}\nfunction pair(w) {\n    const hi = (w >> 8) & 255, lo = w & 255;\n    if (TIME_MODE === \"bcd\") return [(hi >> 4) * 10 + (hi & 15), (lo >> 4) * 10 + (lo & 15)];\n    if (TIME_MODE === \"dec\") return [Math.floor(w / 100), w % 100];\n    return [hi, lo];\n}\nfunction hmiTime(words) {\n    if (words.every(x => x === 0)) return \"\";\n    const [y, mo] = pair(words[0]), [d, h] = pair(words[1]), [mi, s] = pair(words[2]);\n    const p = n => String(n).padStart(2, \"0\");\n    return `20${p(y)}-${p(mo)}-${p(d)} ${p(h)}:${p(mi)}:${p(s)}`;\n}\nconst STATUS_TEXT = {0:\"Idle\",1:\"Manual\",2:\"Semi-Auto\",4:\"Auto\",8:\"Adj. Mould\",\n                     17:\"Manual Error\",18:\"Semi-Auto Error\",19:\"Adj. Mould Error\",20:\"Auto Error\"};\n\nconst d = flow.get(\"cm_data\") || {};\nif (msg.topic === \"operator\" && v.length >= 10) {\n    d.operator = chars(v.slice(0, 10));\n} else if (msg.topic === \"times\" && v.length >= 6) {\n    d.jobStart  = hmiTime(v.slice(0, 3));\n    d.jobFinish = hmiTime(v.slice(3, 6));\n    d.rawTimes  = v.slice(0, 6);\n} else if (msg.topic === \"counter\" && v.length >= 6) {\n    // 32879 cav | 32880-81 target | 32882-83 shot | 32884 status\n    d.cavities    = v[0];\n    d.targetShots = u32(v[1], v[2]);\n    d.shotCount   = u32(v[3], v[4]);\n    d.status      = v[5];\n    d.statusText  = STATUS_TEXT[v[5]] || (\"Unknown(\" + v[5] + \")\");\n    d.rawShot     = [v[3], v[4]];\n    flow.set(\"cm_lastOk\", Date.now());   // ใช้ชุดนี้เป็นตัวบอกว่า HMI ยังตอบอยู่\n} else {\n    node.warn(\"ข้อมูลไม่ครบ topic=\" + msg.topic + \" len=\" + v.length);\n    return null;\n}\nflow.set(\"cm_data\", d);\nnode.status({fill: \"green\", shape: \"dot\", text: msg.topic + \" ok \" + new Date().toLocaleTimeString(\"en-GB\")});\nmsg.payload = d;\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 450,
+    "y": 140,
+    "wires": [
+      [
+        "153a229f6702eb5f"
+      ]
+    ]
+  },
+  {
+    "id": "f98af1b2b2abfcde",
+    "type": "function",
+    "z": "6056513676c4237e",
+    "name": "decode cycle time",
+    "func": "// register 32970 = Cycle Time (ทศนิยม 1 ตำแหน่ง)\nconst v = Array.isArray(msg.payload) ? msg.payload\n        : (msg.payload && Array.isArray(msg.payload.data)) ? msg.payload.data : [];\nif (!v.length) return null;\nflow.set(\"cm_cycle\", v[0] / 10);\nreturn null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 440,
+    "y": 220,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "153a229f6702eb5f",
+    "type": "debug",
+    "z": "6056513676c4237e",
+    "name": "decoded (ปิดไว้)",
+    "active": false,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 690,
+    "y": 140,
+    "wires": []
+  },
+  {
+    "id": "902c502f442c5387",
+    "type": "inject",
+    "z": "6056513676c4237e",
+    "name": "ทุก 5 วินาที",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "5",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "3",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 160,
+    "y": 320,
+    "wires": [
+      [
+        "9b8f0774c5964538"
+      ]
+    ]
+  },
+  {
+    "id": "9b8f0774c5964538",
+    "type": "function",
+    "z": "6056513676c4237e",
+    "name": "build JSON",
+    "func": "// สร้าง JSON ส่งไป CounterMachine.aspx\nconst MACHINE  = \"MC7\";\nconst STALE_MS = 10000;      // HMI ไม่ตอบเกิน 10 วินาที = OFF\nconst NO_TARGET = 99999999;  // ค่าเป้า 99,999,999 = ไม่ได้ตั้งเป้าบน HMI\n\nconst b      = flow.get(\"cm_data\");\nconst lastOk = flow.get(\"cm_lastOk\") || 0;\nconst online = !!b && (Date.now() - lastOk) < STALE_MS;\n\nif (online) {\n    msg.payload = {\n        machine:     MACHINE,\n        online:      true,\n        power:       \"ON\",\n        status:      b.status,\n        statusText:  b.statusText,\n        operator:    b.operator,\n        shotCount:   b.shotCount,\n        cycleTime:   flow.get(\"cm_cycle\") ?? null,\n        cavities:    b.cavities,\n        targetShots: (b.targetShots > 0 && b.targetShots < NO_TARGET) ? b.targetShots : null,\n        jobStart:    b.jobStart,\n        jobFinish:   b.jobFinish,\n        ts:          new Date().toISOString()\n    };\n} else {\n    msg.payload = { machine: MACHINE, online: false, power: \"OFF\", ts: new Date().toISOString() };\n}\n\nmsg.headers = { \"Content-Type\": \"application/json\" };\n// ถ้าตั้ง API_KEY ในหน้า aspx ให้เปิดบรรทัดนี้:\n// msg.headers[\"X-Api-Key\"] = \"ใส่คีย์\";\n// ไม่รอนาน: ถ้าเซิร์ฟเวอร์ไม่ตอบภายใน 4 วินาทีให้ตัดทิ้ง (กัน request ค้างสะสม)\nmsg.requestTimeout = 4000;\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 360,
+    "y": 320,
+    "wires": [
+      [
+        "b4f45d7f17da0970"
+      ]
+    ]
+  },
+  {
+    "id": "b4f45d7f17da0970",
+    "type": "http request",
+    "z": "6056513676c4237e",
+    "name": "POST CounterMachine.aspx",
+    "method": "POST",
+    "ret": "txt",
+    "paytoqs": "ignore",
+    "url": "http://192.168.100.20/Dashboard/CounterMachine.aspx",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 580,
+    "y": 320,
+    "wires": [
+      [
+        "2f3ac6a43233b8b1"
+      ]
+    ]
+  },
+  {
+    "id": "2f3ac6a43233b8b1",
+    "type": "debug",
+    "z": "6056513676c4237e",
+    "name": "server response",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 800,
+    "y": 320,
+    "wires": []
+  },
+  {
+    "id": "ea390b5e109d8669",
+    "type": "catch",
+    "z": "6056513676c4237e",
+    "name": "จับ error การส่ง",
+    "scope": [
+      "b4f45d7f17da0970",
+      "3c872f79b307bd2d"
+    ],
+    "uncaught": false,
+    "x": 160,
+    "y": 420,
+    "wires": [
+      [
+        "d19a5f0da30ee1de"
+      ]
+    ]
+  },
+  {
+    "id": "d19a5f0da30ee1de",
+    "type": "debug",
+    "z": "6056513676c4237e",
+    "name": "HTTP error",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": true,
+    "complete": "error.message",
+    "targetType": "msg",
+    "statusVal": "error.message",
+    "statusType": "msg",
+    "x": 380,
+    "y": 420,
+    "wires": []
+  },
+  {
+    "id": "a9d2d7ebd1ac75c0",
+    "type": "inject",
+    "z": "6056513676c4237e",
+    "name": "ทดสอบเชื่อมต่อเว็บ (กดเอง)",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 190,
+    "y": 500,
+    "wires": [
+      [
+        "8b676e2f03e56f26"
+      ]
+    ]
+  },
+  {
+    "id": "8b676e2f03e56f26",
+    "type": "function",
+    "z": "6056513676c4237e",
+    "name": "timeout 4s",
+    "func": "msg.requestTimeout = 4000;\nmsg.payload = '';\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 400,
+    "y": 500,
+    "wires": [
+      [
+        "3c872f79b307bd2d"
+      ]
+    ]
+  },
+  {
+    "id": "3c872f79b307bd2d",
+    "type": "http request",
+    "z": "6056513676c4237e",
+    "name": "GET CounterMachine ?format=json",
+    "method": "GET",
+    "ret": "txt",
+    "paytoqs": "ignore",
+    "url": "http://192.168.100.20/Dashboard/CounterMachine.aspx?format=json",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 620,
+    "y": 500,
+    "wires": [
+      [
+        "917ce215f9f594f7"
+      ]
+    ]
+  },
+  {
+    "id": "917ce215f9f594f7",
+    "type": "debug",
+    "z": "6056513676c4237e",
+    "name": "ผลทดสอบ",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": true,
+    "complete": "true",
+    "targetType": "full",
+    "statusVal": "statusCode",
+    "statusType": "msg",
+    "x": 850,
+    "y": 500,
+    "wires": []
+  },
+  {
+    "type": "modbus-read",
+    "z": "6056513676c4237e",
+    "showStatusActivities": false,
+    "logIOActivities": false,
+    "showErrors": false,
+    "showWarnings": true,
+    "unitid": "1",
+    "dataType": "HoldingRegister",
+    "rate": "5",
+    "rateUnit": "s",
+    "delayOnStart": false,
+    "enableDeformedMessages": false,
+    "startDelayTime": "",
+    "server": "6c52dc0ccd5184a5",
+    "useIOFile": false,
+    "ioFile": "",
+    "useIOForPayload": false,
+    "emptyMsgOnFail": false,
+    "id": "dfa2abd863d9d8cc",
+    "name": "MC7 Operator 32849 (10w)",
+    "adr": "32848",
+    "quantity": "10",
+    "topic": "operator",
+    "x": 200,
+    "y": 60,
+    "wires": [
+      [
+        "a04058a54cb482fc"
+      ],
+      []
+    ]
+  },
+  {
+    "type": "modbus-read",
+    "z": "6056513676c4237e",
+    "showStatusActivities": false,
+    "logIOActivities": false,
+    "showErrors": false,
+    "showWarnings": true,
+    "unitid": "1",
+    "dataType": "HoldingRegister",
+    "rate": "5",
+    "rateUnit": "s",
+    "delayOnStart": false,
+    "enableDeformedMessages": false,
+    "startDelayTime": "",
+    "server": "6c52dc0ccd5184a5",
+    "useIOFile": false,
+    "ioFile": "",
+    "useIOForPayload": false,
+    "emptyMsgOnFail": false,
+    "id": "656897f1e89d45a9",
+    "name": "MC7 Job Start/Finish 32869-32874",
+    "adr": "32868",
+    "quantity": "6",
+    "topic": "times",
+    "x": 210,
+    "y": 100,
+    "wires": [
+      [
+        "a04058a54cb482fc"
+      ],
+      []
+    ]
+  },
+  {
+    "id": "6c52dc0ccd5184a5",
+    "type": "modbus-client",
+    "name": "MC7 HMI (Counter)",
+    "clienttype": "tcp",
+    "bufferCommands": true,
+    "stateLogEnabled": false,
+    "queueLogEnabled": false,
+    "failureLogEnabled": true,
+    "tcpHost": "192.168.0.1",
+    "tcpPort": "502",
+    "tcpType": "DEFAULT",
+    "serialPort": "/dev/ttyUSB",
+    "serialType": "RTU-BUFFERD",
+    "serialBaudrate": "9600",
+    "serialDatabits": "8",
+    "serialStopbits": "1",
+    "serialParity": "none",
+    "serialConnectionDelay": "100",
+    "serialAsciiResponseStartDelimiter": "0x3A",
+    "unit_id": "1",
+    "commandDelay": "1",
+    "clientTimeout": "1000",
+    "reconnectOnTimeout": true,
+    "reconnectTimeout": "2000",
+    "parallelUnitIdsAllowed": true,
+    "showErrors": false,
+    "showWarnings": true,
+    "showLogs": true
+  }
+]

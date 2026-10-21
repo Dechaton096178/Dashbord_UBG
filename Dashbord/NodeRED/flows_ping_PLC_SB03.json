@@ -1,0 +1,108 @@
+[
+ {
+  "id": "b3a10f0000000001",
+  "type": "tab",
+  "label": "Ping PLC 192.168.0.101",
+  "disabled": false,
+  "info": "ping + ทดสอบ port 502/5000 ของ PLC SB03"
+ },
+ {
+  "id": "b3a10f0000000002",
+  "type": "comment",
+  "z": "b3a10f0000000001",
+  "name": "กดปุ่ม หรือรันเองทุก 10 วินาที → ดูสถานะใต้ node และแท็บ Debug",
+  "info": "",
+  "x": 330,
+  "y": 40,
+  "wires": []
+ },
+ {
+  "id": "b3a10f0000000003",
+  "type": "inject",
+  "z": "b3a10f0000000001",
+  "name": "ping ทุก 10 วิ",
+  "props": [
+   {
+    "p": "payload"
+   }
+  ],
+  "repeat": "10",
+  "crontab": "",
+  "once": true,
+  "onceDelay": "2",
+  "topic": "",
+  "payload": "",
+  "payloadType": "str",
+  "x": 150,
+  "y": 100,
+  "wires": [
+   [
+    "b3a10f0000000004"
+   ]
+  ]
+ },
+ {
+  "id": "b3a10f0000000004",
+  "type": "exec",
+  "z": "b3a10f0000000001",
+  "command": "ping -c 4 -W 1 192.168.0.101; ip -br link show eth0; ip -4 -br addr show eth0; echo HOST=$(hostname)",
+  "addpay": "",
+  "append": "",
+  "useSpawn": "false",
+  "timer": "10",
+  "winHide": false,
+  "oldrc": false,
+  "name": "ping 192.168.0.101",
+  "x": 360,
+  "y": 100,
+  "wires": [
+   [
+    "b3a10f0000000005"
+   ],
+   [],
+   []
+  ]
+ },
+ {
+  "id": "b3a10f0000000005",
+  "type": "function",
+  "z": "b3a10f0000000001",
+  "name": "สรุป ping + port 502/5000",
+  "func": "// @ts-nocheck\n// สรุปผล ping + เช็คสาย eth0 + ลองต่อ TCP port 502 / 5000 ของ PLC\nconst HOST = \"192.168.0.101\";\nconst PORTS = [502, 5000];\nconst TMO = 2000;\nconst txt = String(msg.payload || \"\");\nconst m = txt.match(/(\\d+) packets transmitted, (\\d+) (?:packets )?received/);\nconst sent = m ? +m[1] : 0, recv = m ? +m[2] : 0;\nconst rtt = (txt.match(/= [\\d.]+\\/([\\d.]+)\\//) || [])[1];\n// ip -br link: \"eth0  UP  e6:71:..  <BROADCAST,MULTICAST,UP,LOWER_UP>\"\nconst lk = (txt.match(/^eth0\\s+(\\S+)\\s+\\S+\\s+<([^>]*)>/m) || []);\nconst link = !lk[0] ? \"ไม่พบ eth0\" : /NO-CARRIER/.test(lk[2]) || lk[1] === \"DOWN\" ? \"DOWN (ไม่มีสาย/ปลายทางดับ)\" : /LOWER_UP/.test(lk[2]) ? \"UP (มีสาย)\" : lk[1];\nconst ip = (txt.match(/^eth0\\s+\\S+\\s+(\\d+\\.\\d+\\.\\d+\\.\\d+\\/\\d+)/m) || [])[1] || \"ไม่มี IP\";\n\nfunction probe(port) {\n    return new Promise(res => {\n        const s = new net.Socket(); const t0 = Date.now(); let done = false;\n        const end = r => { if (done) return; done = true; s.destroy(); res(port + \": \" + r + \" (\" + (Date.now() - t0) + \"ms)\"); };\n        s.setTimeout(TMO);\n        s.once(\"connect\", () => {\n            // ต่อติดแล้ว รอดูว่า PLC ตัดสายทันทีไหม\n            setTimeout(() => end(\"เปิด ✓ ต่อได้\"), 800);\n            s.once(\"close\", () => end(\"ต่อได้แต่ PLC ตัดสายทันที ✗\"));\n        });\n        s.once(\"timeout\", () => end(\"timeout ✗ (PLC ไม่ตอบ)\"));\n        s.once(\"error\", e => end((e.code === \"ECONNREFUSED\" ? \"ปิด ✗ (PLC ปฏิเสธ)\" : \"error \" + e.code)));\n        s.connect(port, HOST);\n    });\n}\n\n(async () => {\n    const tcp = [];\n    for (const p of PORTS) tcp.push(await probe(p));\n    const ok = recv > 0;\n    const res = {\n        กล่อง: (txt.match(/^HOST=(.*)$/m) || [])[1] || \"?\",\n        เวลา: new Date().toLocaleString(\"en-GB\"),\n        eth0: link + \" · \" + ip,\n        ping: HOST + \" \" + recv + \"/\" + sent + \" ตอบ\" + (rtt ? \" · เฉลี่ย \" + rtt + \" ms\" : \"\"),\n        tcp: tcp\n    };\n    const p502 = tcp[0] || \"\";\n    node.status({\n        fill: ok && /✓/.test(p502) ? \"green\" : ok ? \"yellow\" : \"red\", shape: \"dot\",\n        text: \"ping \" + recv + \"/\" + sent + \" | \" + p502.replace(/ \\(\\d+ms\\)/, \"\")\n    });\n    node.send({ topic: \"ping \" + HOST, payload: res });\n})();\nreturn null;\n",
+  "outputs": 1,
+  "timeout": 0,
+  "noerr": 0,
+  "initialize": "",
+  "finalize": "",
+  "libs": [
+   {
+    "var": "net",
+    "module": "net"
+   }
+  ],
+  "x": 600,
+  "y": 100,
+  "wires": [
+   [
+    "b3a10f0000000006"
+   ]
+  ]
+ },
+ {
+  "id": "b3a10f0000000006",
+  "type": "debug",
+  "z": "b3a10f0000000001",
+  "name": "ผล ping PLC",
+  "active": true,
+  "tosidebar": true,
+  "console": false,
+  "tostatus": false,
+  "complete": "payload",
+  "targetType": "msg",
+  "statusVal": "",
+  "statusType": "auto",
+  "x": 830,
+  "y": 100,
+  "wires": []
+ }
+]

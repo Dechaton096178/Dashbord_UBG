@@ -1,0 +1,317 @@
+[
+ {
+  "id": "a4b3f9b1219758c0",
+  "type": "tab",
+  "label": "SB03 Seambuffing 3 (PLC 192.168.0.101)",
+  "disabled": false,
+  "env": [],
+  "info": "อ่าน PLC Mitsubishi 192.168.0.101 — หา protocol (MC 3E / Modbus TCP) และ port เอง\nใช้เฉพาะ node มาตรฐาน + module net ของ Node.js"
+ },
+ {
+  "id": "b8e92c32c4b1df16",
+  "type": "comment",
+  "z": "a4b3f9b1219758c0",
+  "name": "Deploy แล้วรอ ~30 วินาที → ดูแท็บ Debug (ตั้ง filter เป็น 'all nodes')",
+  "info": "",
+  "x": 330,
+  "y": 40,
+  "wires": []
+ },
+ {
+  "id": "4a41e82c50d2f259",
+  "type": "inject",
+  "z": "a4b3f9b1219758c0",
+  "name": "ทุก 3 วินาที",
+  "props": [
+   {
+    "p": "payload"
+   }
+  ],
+  "repeat": "3",
+  "crontab": "",
+  "once": true,
+  "onceDelay": "1",
+  "topic": "",
+  "payload": "",
+  "payloadType": "date",
+  "x": 130,
+  "y": 100,
+  "wires": [
+   [
+    "ba4ccc185045e3ab"
+   ]
+  ]
+ },
+ {
+  "id": "ba4ccc185045e3ab",
+  "type": "function",
+  "z": "a4b3f9b1219758c0",
+  "name": "อ่าน Tags PLC 192.168.0.101 (อัตโนมัติ)",
+  "func": "// ===== SB03 อ่าน Tags จาก PLC Mitsubishi 192.168.0.101 =====\n// ลองทุกรูปแบบอัตโนมัติ: SLMP 3E Binary / 3E ASCII / 4E Binary / Modbus TCP (unit 1,0,255)\n// เจอแบบที่ใช้ได้แล้วจำไว้ ต่อค้างไว้ใช้ซ้ำ (PLC รับทีละ 1 connection)\n// Output 1 = ค่าสำหรับ Dashboard | Output 2 = Tags (ชื่อ + ค่า) | Output 3 = ผลค้นหา / error\nconst HOST  = \"192.168.0.101\";\nconst PORTS = [5000, 5100, 502, 5001, 5002, 5003, 5004, 5005, 5006, 5007, 5010, 5011, 5012, 1025, 1026, 4999, 8000, 5015];\nconst TMO   = 2500;\nconst PTS   = 332;                          // D0..D331\n\n// รายการ Tags (D = เลข register, bits = 16/32, div = หารเพื่อได้ค่าจริง)\nconst TAGS = [\n    { key: \"status\", d: 0,   bits: 16, name: \"สถานะเครื่อง (1=OP 2=EG 3=SV)\" },\n    { key: \"ng\",     d: 60,  bits: 16, name: \"NG\" },\n    { key: \"ccdNg\",  d: 300, bits: 32, name: \"CCD 檢測異常 (CCD NG)\" },\n    { key: \"ccdOk\",  d: 320, bits: 16, name: \"CCD 檢測 OK\" },\n    { key: \"total\",  d: 322, bits: 32, name: \"入球總數 ยอดรวม (Total)\" },\n    { key: \"rate\",   d: 330, bits: 32, div: 10, name: \"定位率 % (Positioning rate)\" }\n];\n\nif (context.get(\"busy\")) return null;\ncontext.set(\"busy\", true);\n\n// ---------- การเชื่อมต่อแบบค้างไว้ ----------\nfunction getConn(port) {\n    let c = context.get(\"conn\");\n    if (c && c.port === port && !c.dead) return Promise.resolve(c);\n    if (c && c.sock) { try { c.sock.destroy(); } catch (e) {} }\n    return new Promise(res => {\n        const s = new net.Socket();\n        c = { port, sock: s, buf: Buffer.alloc(0), wait: null, dead: false, ready: false, t0: Date.now() };\n        const kill = (why) => { if (!c.dead) c.lifeMs = Date.now() - c.t0; c.dead = true; c.why = c.why || why; if (c.wait) { const w = c.wait; c.wait = null; w({ err: why }); } };\n        s.setNoDelay(true); s.setKeepAlive(true, 10000);\n        s.on(\"data\", d => { c.buf = Buffer.concat([c.buf, d]); if (c.wait) c.wait(); });\n        s.on(\"error\", e => kill(e.code || e.message));\n        s.on(\"close\", () => kill(\"closed\"));\n        const t = setTimeout(() => { if (!c.ready) { kill(\"connect timeout\"); s.destroy(); res(c); } }, TMO);\n        s.connect(port, HOST, () => { clearTimeout(t); c.ready = true; c.t0 = Date.now(); res(c); });\n        context.set(\"conn\", c);\n    });\n}\nfunction ask(c, frame, need) {\n    return new Promise(res => {\n        if (c.dead || !c.ready) return res({ err: c.why === \"closed\" ? \"PLC ตัดสาย\" : \"ไม่ได้เชื่อมต่อ\" });\n        c.buf = Buffer.alloc(0);\n        const t = setTimeout(() => { c.wait = null; c.dead = true; try { c.sock.destroy(); } catch (e) {} res({ err: \"ไม่ตอบ (timeout)\" }); }, TMO);\n        c.wait = (fail) => {\n            if (fail && fail.err) { clearTimeout(t); return res({ err: fail.err === \"closed\" ? \"PLC ตัดสายหลังส่งคำสั่ง\" : fail.err }); }\n            if (need(c.buf)) { clearTimeout(t); c.wait = null; const b = c.buf; c.buf = Buffer.alloc(0); res({ buf: b }); }\n        };\n        c.sock.write(frame);\n    });\n}\nconst sleep = ms => new Promise(r => setTimeout(r, ms));\n\n// ---------- รูปแบบ frame ----------\nfunction mc3eBin(start, n) {\n    const b = Buffer.alloc(21);\n    b.writeUInt16LE(0x0050, 0); b[2] = 0; b[3] = 0xFF; b.writeUInt16LE(0x03FF, 4); b[6] = 0;\n    b.writeUInt16LE(12, 7); b.writeUInt16LE(0x0010, 9); b.writeUInt16LE(0x0401, 11); b.writeUInt16LE(0, 13);\n    b.writeUIntLE(start, 15, 3); b[18] = 0xA8; b.writeUInt16LE(n, 19); return b;\n}\nfunction mc4eBin(start, n) {\n    const b = Buffer.alloc(25);\n    b.writeUInt16LE(0x0054, 0); b.writeUInt16LE(0x0001, 2); b.writeUInt16LE(0, 4);\n    b[6] = 0; b[7] = 0xFF; b.writeUInt16LE(0x03FF, 8); b[10] = 0;\n    b.writeUInt16LE(12, 11); b.writeUInt16LE(0x0010, 13); b.writeUInt16LE(0x0401, 15); b.writeUInt16LE(0, 17);\n    b.writeUIntLE(start, 19, 3); b[22] = 0xA8; b.writeUInt16LE(n, 23); return b;\n}\nconst hx = (v, w) => v.toString(16).toUpperCase().padStart(w, \"0\");\nfunction mc3eAscii(start, n) { return Buffer.from(\"500000FF03FF00\" + \"0018\" + \"0010\" + \"0401\" + \"0000\" + \"D*\" + String(start).padStart(6, \"0\") + hx(n, 4), \"latin1\"); }\n\nasync function readMcBin(c, is4e) {\n    const off = is4e ? 4 : 0;\n    const r = await ask(c, is4e ? mc4eBin(0, PTS) : mc3eBin(0, PTS), b => b.length >= 11 + off && b.length >= 9 + off + b.readUInt16LE(7 + off));\n    if (r.err) return r;\n    if (r.buf.readUInt16LE(0) !== (is4e ? 0x00D4 : 0x00D0)) return { err: \"ตอบมาแต่ไม่ใช่ MC (\" + r.buf.slice(0, 8).toString(\"hex\") + \")\" };\n    const end = r.buf.readUInt16LE(9 + off);\n    if (end !== 0) return { err: \"MC end code 0x\" + end.toString(16).toUpperCase() };\n    const v = []; for (let i = 0; i < PTS; i++) v.push(r.buf.readUInt16LE(11 + off + i * 2)); return { v };\n}\nasync function readMcAscii(c) {\n    const r = await ask(c, mc3eAscii(0, PTS), b => b.length >= 18 && b.length >= 18 + parseInt(b.toString(\"latin1\", 14, 18), 16));\n    if (r.err) return r;\n    const s = r.buf.toString(\"latin1\");\n    if (!s.startsWith(\"D000\")) return { err: \"ตอบมาแต่ไม่ใช่ MC ASCII (\" + s.slice(0, 12) + \")\" };\n    const end = s.slice(18, 22);\n    if (end !== \"0000\") return { err: \"MC end code 0x\" + end };\n    const v = []; for (let i = 0; i < PTS; i++) v.push(parseInt(s.substr(22 + i * 4, 4), 16)); return { v };\n}\nlet tid = 0;\nasync function readMb(c, unit) {\n    const v = new Array(PTS).fill(0);\n    for (const [s, n] of [[0, 1], [60, 1], [300, 32]]) {\n        tid = (tid + 1) & 0xFFFF;\n        const r = await ask(c, Buffer.from([tid >> 8, tid & 255, 0, 0, 0, 6, unit, 3, s >> 8, s & 255, n >> 8, n & 255]),\n                            b => b.length >= 9 && b.length >= 6 + b.readUInt16BE(4));\n        if (r.err) return r;\n        if (r.buf[7] !== 3) return { err: r.buf[7] === 0x83 ? \"Modbus exception \" + r.buf[8] : \"ไม่ใช่ Modbus\" };\n        for (let i = 0; i < n; i++) v[s + i] = r.buf.readUInt16BE(9 + i * 2);\n    }\n    return { v };\n}\nconst PROTOS = [\"MC3E\", \"MC3E-ASCII\", \"MC4E\", \"MB1\", \"MB0\", \"MB255\"];\nfunction readWith(c, proto) {\n    if (proto === \"MC3E\") return readMcBin(c, false);\n    if (proto === \"MC4E\") return readMcBin(c, true);\n    if (proto === \"MC3E-ASCII\") return readMcAscii(c);\n    return readMb(c, +proto.slice(2));\n}\nasync function readOnce(cfg) {\n    const c = await getConn(cfg.port);\n    if (c.dead) return { err: \"ต่อ port \" + cfg.port + \" ไม่ได้ (\" + (c.why || \"?\") + \")\", closedPort: true };\n    return readWith(c, cfg.proto);\n}\n\nasync function discover() {\n    const report = [];\n    for (const port of PORTS) {\n        for (const proto of PROTOS) {\n            node.status({ fill: \"blue\", shape: \"ring\", text: \"กำลังหา... \" + port + \" \" + proto });\n            const r = await readOnce({ proto, port });\n            if (r.v) { report.push(\"✓ \" + port + \" \" + proto + \" ใช้ได้\"); return { cfg: { proto, port }, report, v: r.v }; }\n            const c = context.get(\"conn\");\n            report.push(port + \" \" + proto + \": \" + r.err);\n            if (c) { c.dead = true; try { c.sock.destroy(); } catch (e) {} }\n            if (r.closedPort) break;                 // port ปิด ข้ามไป port ถัดไป\n            await sleep(300);\n        }\n    }\n    // ช่วยวิเคราะห์: ต่อได้แต่ PLC ตัดทุกแบบ\n    if (report.some(s => /^502 .*ตัดสาย/.test(s)) && report.filter(s => /^502 /.test(s)).every(s => /ตัดสาย/.test(s))) {\n        report.push(\"→ port 502 รับต่อแต่ตัดสายทุกแบบ: ใน GX Works3 ให้เช็ค External Device Configuration ว่า IP ปลายทางเป็น 192.168.0.2 (กล่องนี้) หรือ connection ถูกเครื่องอื่นใช้อยู่\");\n    }\n    return { report };\n}\n\nfunction decode(v) {\n    const tags = {}, out = {};\n    for (const t of TAGS) {\n        let x = t.bits === 32 ? v[t.d] + v[t.d + 1] * 65536 : v[t.d];\n        if (t.div) x = x / t.div;\n        out[t.key] = x;\n        tags[(t.bits === 32 ? \"D\" + t.d + \"-\" + (t.d + 1) : \"D\" + t.d) + \" \" + t.name] = x;\n    }\n    out.ok = Math.max(0, out.total - out.ng);\n    out.statusText = { 0: \"STOP\", 1: \"OP\", 2: \"EG\", 3: \"SV\" }[out.status] || (\"?\" + out.status);\n    out.time = new Date().toLocaleString(\"en-GB\");\n    tags[\"OK (Total - NG)\"] = out.ok;\n    return { out, tags };\n}\n\n(async () => {\n    try {\n        let cfg = context.get(\"cfg\"), v;\n        if (!cfg) {\n            if (Date.now() < (context.get(\"retryAt\") || 0)) return;\n            const d = await discover();\n            node.send([null, null, { topic: \"ผลค้นหา \" + HOST, payload: d.report }]);\n            if (!d.cfg) { node.status({ fill: \"red\", shape: \"ring\", text: \"หา PLC ไม่เจอ ดูผลใน Debug (ลองใหม่ทุก 60 วิ)\" }); context.set(\"retryAt\", Date.now() + 60000); return; }\n            cfg = d.cfg; context.set(\"cfg\", cfg); v = d.v;\n        } else {\n            let r = await readOnce(cfg);\n            if (!r.v) r = await readOnce(cfg);\n            if (!r.v) {\n                const n = (context.get(\"fail\") || 0) + 1; context.set(\"fail\", n);\n                node.status({ fill: \"red\", shape: \"ring\", text: cfg.proto + \":\" + cfg.port + \" \" + r.err + \" (\" + n + \")\" });\n                if (n >= 40) { context.set(\"cfg\", null); context.set(\"fail\", 0); }\n                return;\n            }\n            v = r.v;\n        }\n        context.set(\"fail\", 0);\n        const { out, tags } = decode(v);\n\n        // ---- CT (วินาที/ชิ้น) จาก Counter ที่เพิ่มขึ้นใน 60 วินาทีล่าสุด ----\n        const WIN = 60000, now = Date.now();\n        let hist = (context.get(\"hist\") || []).filter(h => now - h.t <= WIN * 2);\n        const last = hist[hist.length - 1];\n        if (last && out.total < last.c) hist = [];\n        hist.push({ t: now, c: out.total });\n        context.set(\"hist\", hist);\n        const base = hist.find(h => now - h.t <= WIN) || hist[0];\n        const dC = out.total - base.c, dT = (now - base.t) / 1000;\n        if (dC > 0 && dT >= 10) {\n            out.ct = Math.round(dT / dC * 100) / 100;\n            out.pcsPerMin = Math.round(dC / dT * 60 * 10) / 10;\n            context.set(\"lastCt\", out.ct);\n        } else {\n            out.ct = dT >= 10 ? null : (context.get(\"lastCt\") != null ? context.get(\"lastCt\") : null);\n            out.pcsPerMin = dT >= 10 ? 0 : null;\n        }\n        tags[\"CT วินาที/ชิ้น (คำนวณ)\"] = out.ct;\n        tags[\"ชิ้น/นาที (คำนวณ)\"] = out.pcsPerMin;\n        tags[\"อ่านด้วย\"] = cfg.proto + \" port \" + cfg.port;\n        tags[\"เวลา\"] = out.time;\n\n        flow.set(\"sb03\", out); flow.set(\"sb03_ok\", Date.now()); flow.set(\"sb03_tags\", tags);\n        node.status({ fill: \"green\", shape: \"dot\", text: cfg.proto + \":\" + cfg.port + \" | \" + out.statusText + \" Total \" + out.total + \" NG \" + out.ng + \" CT \" + (out.ct != null ? out.ct : \"-\") + \"s\" });\n        node.send([{ topic: \"SB03\", payload: out }, { topic: \"SB03 Tags\", payload: tags }, null]);\n    } catch (e) {\n        node.status({ fill: \"red\", shape: \"ring\", text: String(e.message || e) });\n        node.send([null, null, { topic: \"error\", payload: String(e.stack || e) }]);\n    } finally {\n        context.set(\"busy\", false);\n    }\n})();\nreturn null;\n",
+  "outputs": 3,
+  "timeout": 0,
+  "noerr": 0,
+  "initialize": "",
+  "finalize": "// ปิดการเชื่อมต่อเมื่อ Deploy / หยุด flow\nconst c = context.get(\"conn\"); if (c && c.sock) { try { c.sock.destroy(); } catch (e) {} }\ncontext.set(\"conn\", null); context.set(\"busy\", false);",
+  "libs": [
+   {
+    "var": "net",
+    "module": "net"
+   }
+  ],
+  "x": 370,
+  "y": 100,
+  "wires": [
+   [
+    "7ba6b65d1a0a025f"
+   ],
+   [
+    "7f4d04e17a789633"
+   ],
+   [
+    "0bcefa212e9be57a"
+   ]
+  ]
+ },
+ {
+  "id": "7ba6b65d1a0a025f",
+  "type": "debug",
+  "z": "a4b3f9b1219758c0",
+  "name": "SB03 ค่าล่าสุด",
+  "active": false,
+  "tosidebar": true,
+  "console": false,
+  "tostatus": false,
+  "complete": "payload",
+  "targetType": "msg",
+  "statusVal": "",
+  "statusType": "auto",
+  "x": 640,
+  "y": 80,
+  "wires": []
+ },
+ {
+  "id": "7f4d04e17a789633",
+  "type": "debug",
+  "z": "a4b3f9b1219758c0",
+  "name": "SB03 Tags (ชื่อ + ค่า)",
+  "active": true,
+  "tosidebar": true,
+  "console": false,
+  "tostatus": false,
+  "complete": "payload",
+  "targetType": "msg",
+  "statusVal": "",
+  "statusType": "auto",
+  "x": 630,
+  "y": 120,
+  "wires": []
+ },
+ {
+  "id": "0bcefa212e9be57a",
+  "type": "debug",
+  "z": "a4b3f9b1219758c0",
+  "name": "ผลค้นหา / error",
+  "active": true,
+  "tosidebar": true,
+  "console": false,
+  "tostatus": false,
+  "complete": "true",
+  "targetType": "full",
+  "statusVal": "",
+  "statusType": "auto",
+  "x": 640,
+  "y": 160,
+  "wires": []
+ },
+ {
+  "id": "b7a9296374ecf128",
+  "type": "inject",
+  "z": "a4b3f9b1219758c0",
+  "name": "ทดสอบ Debug (กดเอง)",
+  "props": [
+   {
+    "p": "payload"
+   }
+  ],
+  "repeat": "",
+  "crontab": "",
+  "once": true,
+  "onceDelay": "1",
+  "topic": "",
+  "payload": "Node-RED ทำงาน / Debug ใช้ได้",
+  "payloadType": "str",
+  "x": 160,
+  "y": 180,
+  "wires": [
+   [
+    "9e3e52934a7c081a"
+   ]
+  ]
+ },
+ {
+  "id": "9e3e52934a7c081a",
+  "type": "debug",
+  "z": "a4b3f9b1219758c0",
+  "name": "heartbeat",
+  "active": true,
+  "tosidebar": true,
+  "console": false,
+  "tostatus": false,
+  "complete": "payload",
+  "targetType": "msg",
+  "statusVal": "",
+  "statusType": "auto",
+  "x": 370,
+  "y": 180,
+  "wires": []
+ },
+ {
+  "id": "c804688ec68344e6",
+  "type": "comment",
+  "z": "a4b3f9b1219758c0",
+  "name": "ส่งขึ้น Dashboard ทุก 5 วินาที → CounterMachine.aspx (แท็บ Seambuffing)",
+  "info": "",
+  "x": 330,
+  "y": 260,
+  "wires": []
+ },
+ {
+  "id": "87dd416825fd3bc1",
+  "type": "inject",
+  "z": "a4b3f9b1219758c0",
+  "name": "ส่งทุก 5 วินาที",
+  "props": [
+   {
+    "p": "payload"
+   }
+  ],
+  "repeat": "5",
+  "crontab": "",
+  "once": true,
+  "onceDelay": "5",
+  "topic": "",
+  "payload": "",
+  "payloadType": "date",
+  "x": 140,
+  "y": 310,
+  "wires": [
+   [
+    "87634013de98fe6e"
+   ]
+  ]
+ },
+ {
+  "id": "87634013de98fe6e",
+  "type": "function",
+  "z": "a4b3f9b1219758c0",
+  "name": "build JSON SB03",
+  "func": "// ส่งข้อมูล SB03 ไป Dashboard (CounterMachine.aspx)\nconst MACHINE = \"SB03\";            // หน้าเว็บแสดงเป็น \"Seambuffing 3\"\nconst PROCESS = \"Seambuffing\";\nconst IDEAL_CT = 1.2;              // *** CT มาตรฐาน (วินาที/ชิ้น) ใช้คิด Performance -> แก้ให้ตรงมาตรฐานจริง ***\nconst d = flow.get(\"sb03\");\nconst online = !!d && Date.now() - (flow.get(\"sb03_ok\") || 0) < 20000;\n\nif (online) {\n    // สถานะเครื่อง: ดูจาก Counter ที่วิ่ง (D0 ไม่ได้บอกว่าเครื่องเดิน)\n    //   Counter เพิ่มภายใน RUN_HOLD วินาที -> 4 Running\n    //   D0 = 2 (EG) และ Counter ไม่เพิ่ม   -> 18 Breakdown\n    //   อื่นๆ                              -> 1 Idle\n    const RUN_HOLD = 30;\n    const prev = flow.get(\"sb03_prevTotal\");\n    if (prev == null || d.total !== prev) {\n        if (prev != null && d.total > prev) flow.set(\"sb03_lastRun\", Date.now());\n        flow.set(\"sb03_prevTotal\", d.total);\n    }\n    const running = Date.now() - (flow.get(\"sb03_lastRun\") || 0) < RUN_HOLD * 1000;\n    const status = running ? 4 : (d.status === 2 ? 18 : 1);\n    d.statusText = running ? \"RUN\" : (d.status === 2 ? \"EG\" : \"STOP\");\n    msg.payload = {\n        machine: MACHINE, process: PROCESS, online: true, power: \"ON\",\n        status, statusText: d.statusText,\n        shotCount: d.total,          // 入球總數 D322\n        okCount: d.ok,               // total - ng\n        ngCount: d.ng,               // D60\n        cycleTime: (d.ct != null ? d.ct : null),     // วินาที/ชิ้น (คำนวณ)\n        speedPerMin: (d.pcsPerMin != null ? d.pcsPerMin : null),\n        cavities: 1,\n        idealCycleTime: IDEAL_CT,\n        positioningRate: d.rate,     // 定位率 % D330\n        ccdOk: d.ccdOk, ccdNg: d.ccdNg,\n        ts: new Date().toISOString()\n    };\n} else {\n    msg.payload = { machine: MACHINE, process: PROCESS, online: false, power: \"OFF\", ts: new Date().toISOString() };\n}\nmsg.headers = { \"Content-Type\": \"application/json\" };\nmsg.requestTimeout = 10000;\nnode.status({ fill: online ? \"green\" : \"grey\", shape: \"dot\", text: online ? d.statusText + \" \" + d.total : \"offline\" });\nreturn msg;",
+  "outputs": 1,
+  "timeout": 0,
+  "noerr": 0,
+  "initialize": "",
+  "finalize": "",
+  "libs": [],
+  "x": 340,
+  "y": 310,
+  "wires": [
+   [
+    "bed9d33756117bc4",
+    "28407bce439d3e2e"
+   ]
+  ]
+ },
+ {
+  "id": "bed9d33756117bc4",
+  "type": "http request",
+  "z": "a4b3f9b1219758c0",
+  "name": "POST Dashboard",
+  "method": "POST",
+  "ret": "txt",
+  "paytoqs": "ignore",
+  "url": "http://192.168.100.20/Dashboard/CounterMachine.aspx?proc=Seambuffing",
+  "tls": "",
+  "persist": false,
+  "proxy": "",
+  "insecureHTTPParser": false,
+  "authType": "",
+  "senderr": false,
+  "headers": [],
+  "x": 540,
+  "y": 310,
+  "wires": [
+   [
+    "5ca988bce576295d"
+   ]
+  ]
+ },
+ {
+  "id": "5ca988bce576295d",
+  "type": "debug",
+  "z": "a4b3f9b1219758c0",
+  "name": "server response",
+  "active": true,
+  "tosidebar": true,
+  "console": false,
+  "tostatus": true,
+  "complete": "true",
+  "targetType": "full",
+  "statusVal": "statusCode",
+  "statusType": "msg",
+  "x": 740,
+  "y": 310,
+  "wires": []
+ },
+ {
+  "id": "9ab53b2bbf152669",
+  "type": "catch",
+  "z": "a4b3f9b1219758c0",
+  "name": "error การส่ง",
+  "scope": [
+   "bed9d33756117bc4"
+  ],
+  "uncaught": false,
+  "x": 540,
+  "y": 360,
+  "wires": [
+   [
+    "07c55746ccc5db2d"
+   ]
+  ]
+ },
+ {
+  "id": "07c55746ccc5db2d",
+  "type": "debug",
+  "z": "a4b3f9b1219758c0",
+  "name": "HTTP error",
+  "active": true,
+  "tosidebar": true,
+  "console": false,
+  "tostatus": true,
+  "complete": "error.message",
+  "targetType": "msg",
+  "statusVal": "error.message",
+  "statusType": "msg",
+  "x": 730,
+  "y": 360,
+  "wires": []
+ },
+ {
+  "id": "28407bce439d3e2e",
+  "type": "debug",
+  "z": "a4b3f9b1219758c0",
+  "name": "JSON ที่ส่ง",
+  "active": true,
+  "tosidebar": true,
+  "console": false,
+  "tostatus": false,
+  "complete": "payload",
+  "targetType": "msg",
+  "statusVal": "",
+  "statusType": "auto",
+  "x": 540,
+  "y": 410,
+  "wires": []
+ }
+]

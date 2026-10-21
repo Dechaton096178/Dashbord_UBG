@@ -1,0 +1,383 @@
+﻿<%@ Master Language="C#" AutoEventWireup="true"
+    CodeBehind="Site.Master.cs"
+    Inherits="Dashbord.SiteMaster" %>
+
+<!DOCTYPE html>
+
+<html lang="en">
+
+<head runat="server">
+
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+<%-- Title มาจาก Page Title ของแต่ละหน้า (ห้ามใส่ code block ใน head runat=server) --%>
+<title></title>
+
+<!-- Web icon : รูปทั้งหมดอยู่ในโฟลเดอร์ ~/images/  (~/ = ชั้นบนสุดของโปรเจกต์) -->
+<link rel="icon" type="image/svg+xml" href="~/images/favicon.svg" runat="server" />
+<link rel="icon" type="image/x-icon" href="~/images/favicon.ico" runat="server" />
+<link rel="apple-touch-icon" href="~/images/apple-touch-icon.png" runat="server" />
+<link rel="icon" type="image/png" sizes="192x192" href="~/images/icon-192.png" runat="server" />
+<link rel="shortcut icon" href="~/images/favicon.ico" runat="server" />
+<!-- Manifest : ใช้ตอน "Create shortcut / Install app / Add to Home screen" ให้ไอคอนขึ้นบนหน้าจอ -->
+<link rel="manifest" href="~/manifest.json" runat="server" />
+<meta name="theme-color" content="#312e81" />
+
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700;800&display=swap" rel="stylesheet" />
+
+<style>
+
+    /* =========================================================
+       SITE MASTER : Header + เมนูแผนก (ERP + OEE)
+       ========================================================= */
+
+    :root {
+        --header-h:64px;          /* หน้าลูกใช้คำนวณความสูง: calc(100vh - var(--header-h)) */
+        --nav-ink:#e0e7ff;
+        --nav-mute:#a5b4fc;
+    }
+
+    * { box-sizing:border-box; }
+
+    html, body { margin:0; }
+
+    body {
+        font-family:'Sarabun',Tahoma,sans-serif;
+        background:#eef2f7;
+        color:#0f172a;
+    }
+
+    .site-header {
+        position:sticky; top:0; z-index:1000;
+        height:var(--header-h);
+        display:flex; align-items:center; gap:18px;
+        padding:0 18px;
+        background:linear-gradient(135deg,#1e1b4b,#312e81 60%,#4338ca);
+        color:#fff;
+        box-shadow:0 4px 18px rgba(15,23,42,.18);
+    }
+
+    /* ---------- Brand ---------- */
+    .brand {
+        display:flex; align-items:center; gap:12px;
+        color:#fff; text-decoration:none;
+        flex-shrink:0;
+    }
+    .brand .logo {
+        width:40px; height:40px; border-radius:11px;
+        display:grid; place-items:center;
+        background:rgba(255,255,255,.14);
+        border:1px solid rgba(255,255,255,.25);
+    }
+    .brand b { display:block; font-size:17px; font-weight:700; line-height:1.15; white-space:nowrap; }
+    .brand .short { display:none; }
+    .brand small {
+        display:block; font-size:11px; font-weight:700;
+        letter-spacing:.16em; color:var(--nav-mute);
+        text-transform:uppercase; white-space:nowrap;
+    }
+
+    /* ---------- Nav ---------- */
+    .nav {
+        display:flex; align-items:center; gap:2px;
+        margin:0; padding:0; list-style:none;
+        height:100%;
+    }
+
+    .nav > li { position:relative; height:100%; display:flex; align-items:center; }
+
+    .nav > li > a {
+        display:flex; align-items:center; gap:7px;
+        padding:8px 12px;
+        border-radius:10px;
+        color:var(--nav-ink);
+        text-decoration:none;
+        font-size:14px; font-weight:600;
+        white-space:nowrap;
+        cursor:pointer;
+        transition:background .15s, color .15s;
+    }
+    .nav > li > a svg { opacity:.85; }
+    .nav > li > a .caret { font-size:9px; opacity:.7; }
+
+    .nav > li:hover > a,
+    .nav > li.open > a { background:rgba(255,255,255,.12); color:#fff; }
+
+    .nav > li.active > a {
+        background:rgba(255,255,255,.18);
+        color:#fff;
+        box-shadow:inset 0 -3px 0 #a5b4fc;
+    }
+
+    /* Dropdown */
+    .menu {
+        position:absolute; top:calc(100% - 6px); left:0;
+        min-width:260px;
+        padding:8px;
+        background:#fff;
+        border:1px solid #e2e8f0;
+        border-radius:14px;
+        box-shadow:0 18px 40px rgba(15,23,42,.18);
+        list-style:none; margin:0;
+        opacity:0; visibility:hidden; transform:translateY(6px);
+        transition:opacity .15s, transform .15s, visibility .15s;
+    }
+    .nav > li:hover > .menu,
+    .nav > li.open > .menu { opacity:1; visibility:visible; transform:translateY(0); }
+
+    .menu h6 {
+        margin:4px 10px 6px;
+        font-size:11px; font-weight:700; letter-spacing:.12em;
+        color:#94a3b8; text-transform:uppercase;
+    }
+
+    .menu a {
+        display:flex; align-items:center; gap:10px;
+        padding:9px 10px;
+        border-radius:10px;
+        color:#0f172a; text-decoration:none;
+        font-size:14px;
+    }
+    .menu a:hover { background:#eef2ff; color:#4338ca; }
+    .menu a.current { background:#eef2ff; color:#4338ca; font-weight:700; }
+
+    .menu a .dot {
+        width:8px; height:8px; border-radius:50%;
+        background:#10b981; flex-shrink:0;
+    }
+    .menu a.soon { color:#94a3b8; cursor:default; }
+    .menu a.soon:hover { background:transparent; color:#94a3b8; }
+    .menu a.soon .dot { background:#cbd5e1; }
+    .menu a .tag {
+        margin-left:auto;
+        font-size:10px; font-weight:700; letter-spacing:.06em;
+        padding:2px 7px; border-radius:999px;
+        background:#f1f5f9; color:#94a3b8;
+    }
+
+    /* เมนูย่อย (เช่น MC Monitor -> Process) */
+    .menu li.has-sub > a { cursor:pointer; }
+    .menu .sub-caret { margin-left:auto; font-size:11px; color:#94a3b8; transition:transform .15s; }
+    .menu li.has-sub.sub-open > a .sub-caret { transform:rotate(90deg); color:#4338ca; }
+    .menu .submenu {
+        list-style:none; display:none; margin:2px 0 6px 18px; padding:0 0 0 8px;
+        border-left:2px solid #e0e7ff; max-height:min(60vh, 420px); overflow:auto;
+    }
+    .menu li.has-sub.sub-open > .submenu { display:block; }
+    .menu .submenu a { padding:6px 10px; font-size:13px; }
+    .menu .submenu a .dot { width:6px; height:6px; background:#a5b4fc; }
+
+    /* ---------- ส่วนขวาของ Header (หน้าลูกใส่ได้ เช่น REALTIME) ---------- */
+    .header-right { margin-left:auto; display:flex; align-items:center; gap:10px; flex-shrink:0; }
+
+    .site-header .refresh {
+        display:flex; align-items:center; gap:8px;
+        padding:4px 14px 4px 5px;
+        border:1px solid rgba(255,255,255,.22);
+        border-radius:999px;
+        background:rgba(255,255,255,.1);
+        cursor:pointer; user-select:none;
+        box-shadow:none;
+    }
+    .site-header .refresh:hover { background:rgba(255,255,255,.18); box-shadow:none; }
+    .site-header .ring {
+        --p:360deg;
+        width:36px; height:36px; border-radius:50%;
+        display:grid; place-items:center;
+        background:conic-gradient(#a5b4fc var(--p), rgba(255,255,255,.18) 0);
+    }
+    .site-header .ring b {
+        width:28px; height:28px; border-radius:50%;
+        background:#312e81; color:#fff;
+        display:grid; place-items:center;
+        font-size:12px; font-weight:700;
+        font-variant-numeric:tabular-nums;
+    }
+    .site-header .refresh small {
+        display:flex; align-items:center; gap:6px;
+        font-size:10px; font-weight:700; letter-spacing:.1em; color:#6ee7b7;
+    }
+    .site-header .refresh small::before {
+        content:""; width:8px; height:8px; border-radius:50%;
+        background:#10b981; animation:sm-pulse 1.4s infinite;
+    }
+    .site-header .refresh em { display:block; font-style:normal; font-size:12px; line-height:1.2; color:#c7d2fe; }
+    @keyframes sm-pulse {
+        0%   { box-shadow:0 0 0 0 rgba(16,185,129,.6); }
+        100% { box-shadow:0 0 0 9px rgba(16,185,129,0); }
+    }
+
+    /* ---------- Hamburger (จอเล็ก) ---------- */
+    .burger {
+        display:none;
+        width:40px; height:40px; border-radius:10px;
+        border:1px solid rgba(255,255,255,.25);
+        background:rgba(255,255,255,.1); color:#fff;
+        cursor:pointer;
+        align-items:center; justify-content:center;
+    }
+
+    .nav { min-width:0; }
+
+    @media (max-width:1650px) {
+        .nav > li > a svg { display:none; }
+        .nav > li > a { padding:8px 10px; }
+    }
+
+    @media (max-width:1800px) {
+        .site-header { gap:12px; }
+        .nav > li > a { padding:8px 8px; font-size:13.5px; }
+        .nav > li > a .caret { display:none; }
+    }
+
+    @media (max-width:1560px) {
+        .brand b { font-size:14px; }
+        .brand .full { display:none; }
+        .brand .short { display:inline; }
+        .site-header .refresh em { display:none; }
+    }
+
+    /* เมนูท้าย ๆ เปิด dropdown ชิดขวา ไม่ให้หลุดจอ */
+    .nav > li:nth-last-child(-n+3) > .menu { left:auto; right:0; }
+
+    @media (max-width:1380px) {
+        .burger { display:flex; }
+        .nav {
+            position:fixed; top:var(--header-h); left:0; right:0; bottom:0;
+            flex-direction:column; align-items:stretch; gap:0;
+            height:auto; padding:10px;
+            background:#1e1b4b;
+            overflow:auto;
+            display:none;
+        }
+        .nav.show { display:flex; }
+        .nav > li { height:auto; flex-direction:column; align-items:stretch; }
+        .nav > li > a { padding:12px; font-size:15px; }
+        .nav > li > a svg { display:inline; }
+        .menu {
+            position:static; opacity:1; visibility:visible; transform:none;
+            display:none; box-shadow:none; margin:4px 0 10px;
+        }
+        .nav > li.open > .menu { display:block; }
+        .nav > li:hover > .menu { display:none; }
+        .nav > li.open:hover > .menu { display:block; }
+    }
+
+
+    /* ป้ายยอดเข้าชมหน้า (มุมขวาล่าง) */
+    .pv-badge { position:fixed; right:8px; bottom:6px; z-index:900; display:flex; align-items:center; gap:4px;
+                padding:3px 8px; border-radius:999px; background:rgba(15,23,42,.55); color:#e2e8f0;
+                font:11px/1.2 system-ui, -apple-system, "Segoe UI", sans-serif; opacity:.6; cursor:default;
+                -webkit-user-select:none; user-select:none; transition:opacity .15s; }
+    .pv-badge:hover { opacity:1; }
+    .pv-badge b { font-weight:700; color:#fff; }
+    .pv-badge span { color:#cbd5e1; }
+    @media print { .pv-badge { display:none; } }
+</style>
+
+<asp:ContentPlaceHolder ID="HeadContent" runat="server" />
+
+</head>
+
+
+<body>
+
+<!-- =========================================================
+     HEADER + MENU
+     ========================================================= -->
+
+<header class="site-header">
+
+    <a class="brand" href="<%= ResolveUrl("~/Default.aspx") %>">
+        <span class="logo">
+            <svg width="26" height="26" viewBox="0 0 28 28" fill="none">
+                <circle cx="14" cy="14" r="12" fill="#fff"/>
+                <g fill="#c7d2fe">
+                    <circle cx="10" cy="9" r="1.4"/><circle cx="14" cy="8" r="1.4"/><circle cx="18" cy="9" r="1.4"/>
+                    <circle cx="8" cy="13" r="1.4"/><circle cx="12" cy="12.5" r="1.4"/><circle cx="16" cy="12.5" r="1.4"/><circle cx="20" cy="13" r="1.4"/>
+                    <circle cx="10" cy="17" r="1.4"/><circle cx="14" cy="16.5" r="1.4"/><circle cx="18" cy="17" r="1.4"/>
+                    <circle cx="12" cy="20.5" r="1.4"/><circle cx="16" cy="20.5" r="1.4"/>
+                </g>
+            </svg>
+        </span>
+        <span>
+            <b><span class="full">Universal Base Golf Ball Co., Ltd.</span><span class="short">UBG</span></b>
+            <small><%: Page.Title %></small>
+        </span>
+    </a>
+
+    <button type="button" class="burger" id="navBurger" aria-label="Menu">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </button>
+
+    <!-- เมนูสร้างจาก Site.Master.cs (MenuData) -->
+    <ul class="nav" id="siteNav">
+        <asp:Literal ID="litMenu" runat="server" />
+    </ul>
+
+    <div class="header-right">
+        <asp:ContentPlaceHolder ID="HeaderRight" runat="server" />
+    </div>
+
+</header>
+
+
+<!-- =========================================================
+     PAGE CONTENT
+     ========================================================= -->
+
+<form id="form1" runat="server">
+    <asp:ContentPlaceHolder ID="MainContent" runat="server" />
+</form>
+
+<!-- อยู่นอก <form> : ข้อมูล JSON / script ของหน้าลูก ไม่ถูกส่งกลับตอน postback -->
+<asp:ContentPlaceHolder ID="ScriptContent" runat="server" />
+
+
+<script>
+    // @ts-nocheck
+    (function () {
+        var nav = document.getElementById('siteNav');
+        var burger = document.getElementById('navBurger');
+
+        // จอเล็ก : เปิด/ปิดเมนู
+        burger.addEventListener('click', function () { nav.classList.toggle('show'); });
+
+        // คลิกชื่อแผนก = เปิด/ปิด dropdown (สำหรับจอสัมผัส / จอเล็ก)
+        nav.addEventListener('click', function (e) {
+            var a = e.target.closest('a[data-dept]');
+            if (a) {
+                e.preventDefault();
+                var li = a.parentNode;
+                var was = li.classList.contains('open');
+                nav.querySelectorAll('li.open').forEach(function (x) { x.classList.remove('open'); });
+                if (!was) li.classList.add('open');
+                return;
+            }
+            // เมนูที่มีเมนูย่อย : กด = กาง/หุบ
+            var sub = e.target.closest('a[data-sub]');
+            if (sub) {
+                e.preventDefault();
+                sub.parentNode.classList.toggle('sub-open');
+                return;
+            }
+            var soon = e.target.closest('a.soon');
+            if (soon) e.preventDefault();
+        });
+
+        // คลิกนอกเมนู = ปิด dropdown
+        document.addEventListener('click', function (e) {
+            if (!e.target.closest('#siteNav')) {
+                nav.querySelectorAll('li.open').forEach(function (x) { x.classList.remove('open'); });
+            }
+        });
+    })();
+</script>
+
+<%= ViewLabel %>
+
+</body>
+
+</html>
+ 

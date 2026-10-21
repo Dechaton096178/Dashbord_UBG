@@ -1,0 +1,350 @@
+[
+  {
+    "id": "e554c8bcc39fc701",
+    "type": "tab",
+    "label": "ตรวจเครือข่าย PLC",
+    "disabled": false,
+    "env": [],
+    "info": "ping / route / traceroute จากเครื่อง Node-RED ไปยัง 192.168.0.102"
+  },
+  {
+    "id": "80822287f6d5ee35",
+    "type": "comment",
+    "z": "e554c8bcc39fc701",
+    "name": "กดปุ่มทีละตัว แล้วดูผลในแท็บ Debug",
+    "info": "",
+    "x": 200,
+    "y": 40,
+    "wires": []
+  },
+  {
+    "id": "59ac5d86cbe6b62a",
+    "type": "inject",
+    "z": "e554c8bcc39fc701",
+    "name": "ping PLC 192.168.0.102",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "str",
+    "x": 200,
+    "y": 100,
+    "wires": [
+      [
+        "fc480bcc7271cf6e"
+      ]
+    ]
+  },
+  {
+    "id": "fc480bcc7271cf6e",
+    "type": "exec",
+    "z": "e554c8bcc39fc701",
+    "command": "ping -c 4 -W 1 192.168.0.102",
+    "addpay": "",
+    "append": "",
+    "useSpawn": "false",
+    "timer": "20",
+    "winHide": false,
+    "oldrc": false,
+    "name": "",
+    "x": 520,
+    "y": 100,
+    "wires": [
+      [
+        "5ce4a662b97b232e"
+      ],
+      [
+        "5ce4a662b97b232e"
+      ],
+      []
+    ]
+  },
+  {
+    "id": "5ce4a662b97b232e",
+    "type": "debug",
+    "z": "e554c8bcc39fc701",
+    "name": "ping PLC 192.168.0.102",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 820,
+    "y": 100,
+    "wires": []
+  },
+  {
+    "id": "05be0589528cc761",
+    "type": "inject",
+    "z": "e554c8bcc39fc701",
+    "name": "ping PLC ตัวที่ใช้ได้ 192.168.0.100",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "str",
+    "x": 200,
+    "y": 160,
+    "wires": [
+      [
+        "e1259e2d26e6080e"
+      ]
+    ]
+  },
+  {
+    "id": "e1259e2d26e6080e",
+    "type": "exec",
+    "z": "e554c8bcc39fc701",
+    "command": "ping -c 4 -W 1 192.168.0.100",
+    "addpay": "",
+    "append": "",
+    "useSpawn": "false",
+    "timer": "20",
+    "winHide": false,
+    "oldrc": false,
+    "name": "",
+    "x": 520,
+    "y": 160,
+    "wires": [
+      [
+        "e41b7ed749ada284"
+      ],
+      [
+        "e41b7ed749ada284"
+      ],
+      []
+    ]
+  },
+  {
+    "id": "e41b7ed749ada284",
+    "type": "debug",
+    "z": "e554c8bcc39fc701",
+    "name": "ping PLC ตัวที่ใช้ได้ 192.168.0.100",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 820,
+    "y": 160,
+    "wires": []
+  },
+  {
+    "id": "1c5aedc214ca2ded",
+    "type": "inject",
+    "z": "e554c8bcc39fc701",
+    "name": "เส้นทาง (ip route / ip addr)",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "str",
+    "x": 200,
+    "y": 220,
+    "wires": [
+      [
+        "44922dbb5230ecb8"
+      ]
+    ]
+  },
+  {
+    "id": "44922dbb5230ecb8",
+    "type": "exec",
+    "z": "e554c8bcc39fc701",
+    "command": "ip -4 addr; echo ----; ip route; echo ----; ip route get 192.168.0.102",
+    "addpay": "",
+    "append": "",
+    "useSpawn": "false",
+    "timer": "20",
+    "winHide": false,
+    "oldrc": false,
+    "name": "",
+    "x": 520,
+    "y": 220,
+    "wires": [
+      [
+        "2b19ced05a74adbc"
+      ],
+      [
+        "2b19ced05a74adbc"
+      ],
+      []
+    ]
+  },
+  {
+    "id": "2b19ced05a74adbc",
+    "type": "debug",
+    "z": "e554c8bcc39fc701",
+    "name": "เส้นทาง (ip route / ip addr)",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 820,
+    "y": 220,
+    "wires": []
+  },
+  {
+    "id": "4e2d2afae22932db",
+    "type": "inject",
+    "z": "e554c8bcc39fc701",
+    "name": "traceroute ไป PLC",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "str",
+    "x": 200,
+    "y": 280,
+    "wires": [
+      [
+        "6be7ed64b385523d"
+      ]
+    ]
+  },
+  {
+    "id": "6be7ed64b385523d",
+    "type": "exec",
+    "z": "e554c8bcc39fc701",
+    "command": "traceroute -n -w 1 -m 6 192.168.0.102 || tracepath -n -m 6 192.168.0.102",
+    "addpay": "",
+    "append": "",
+    "useSpawn": "false",
+    "timer": "20",
+    "winHide": false,
+    "oldrc": false,
+    "name": "",
+    "x": 520,
+    "y": 280,
+    "wires": [
+      [
+        "5800c49095b12747"
+      ],
+      [
+        "5800c49095b12747"
+      ],
+      []
+    ]
+  },
+  {
+    "id": "5800c49095b12747",
+    "type": "debug",
+    "z": "e554c8bcc39fc701",
+    "name": "traceroute ไป PLC",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 820,
+    "y": 280,
+    "wires": []
+  },
+  {
+    "id": "bb417becda69eca7",
+    "type": "inject",
+    "z": "e554c8bcc39fc701",
+    "name": "ARP table",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "str",
+    "x": 200,
+    "y": 340,
+    "wires": [
+      [
+        "4fe5b46e049db306"
+      ]
+    ]
+  },
+  {
+    "id": "4fe5b46e049db306",
+    "type": "exec",
+    "z": "e554c8bcc39fc701",
+    "command": "ip neigh || arp -n",
+    "addpay": "",
+    "append": "",
+    "useSpawn": "false",
+    "timer": "20",
+    "winHide": false,
+    "oldrc": false,
+    "name": "",
+    "x": 520,
+    "y": 340,
+    "wires": [
+      [
+        "ea416da10623f445"
+      ],
+      [
+        "ea416da10623f445"
+      ],
+      []
+    ]
+  },
+  {
+    "id": "ea416da10623f445",
+    "type": "debug",
+    "z": "e554c8bcc39fc701",
+    "name": "ARP table",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 820,
+    "y": 340,
+    "wires": []
+  }
+]

@@ -1,0 +1,109 @@
+[
+  {
+    "id": "c111b94f88c0190f",
+    "type": "tab",
+    "label": "หาอุปกรณ์ในวง 192.168.0.x",
+    "disabled": false,
+    "env": [],
+    "info": "ping ทุก IP ในวง eth0 แล้วเช็ค port ของแต่ละเครื่อง เพื่อหาว่าเครื่องไหนคือ PLC / GOT"
+  },
+  {
+    "id": "8a6b661c2a3c8d0a",
+    "type": "comment",
+    "z": "c111b94f88c0190f",
+    "name": "กดปุ่ม แล้วรอ ~20 วินาที ดูผลในแท็บ Debug (กดลูกศรขยาย array)",
+    "info": "",
+    "x": 290,
+    "y": 40,
+    "wires": []
+  },
+  {
+    "id": "0e742af9dbb1810a",
+    "type": "inject",
+    "z": "c111b94f88c0190f",
+    "name": "สแกนวง 192.168.0.1-254",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "str",
+    "x": 170,
+    "y": 100,
+    "wires": [
+      [
+        "ca2eedbc93bcddd6"
+      ]
+    ]
+  },
+  {
+    "id": "ca2eedbc93bcddd6",
+    "type": "exec",
+    "z": "c111b94f88c0190f",
+    "command": "for i in $(seq 1 254); do (ping -c1 -W1 192.168.0.$i >/dev/null 2>&1 && echo UP 192.168.0.$i) & done; wait; echo ===; ip neigh show dev eth0; echo ===; ip -4 addr show dev eth0 | grep inet",
+    "addpay": "",
+    "append": "",
+    "useSpawn": "false",
+    "timer": "40",
+    "winHide": false,
+    "oldrc": false,
+    "name": "ping ทั้งวง",
+    "x": 380,
+    "y": 100,
+    "wires": [
+      [
+        "86ea62dc655edf36"
+      ],
+      [],
+      []
+    ]
+  },
+  {
+    "id": "86ea62dc655edf36",
+    "type": "function",
+    "z": "c111b94f88c0190f",
+    "name": "เช็ค port แต่ละเครื่อง",
+    "func": "// แยกรายการเครื่องที่ ping ได้ + MAC แล้วลองต่อ port ที่ใช้กับ PLC / HMI\nconst PORTS = [502, 5000, 5001, 5002, 5015, 5562, 102, 80, 8000, 44818];\nconst TMO = 800;\nconst txt = String(msg.payload || \"\");\nconst up = new Set((txt.match(/UP (\\d+\\.\\d+\\.\\d+\\.\\d+)/g) || []).map(s => s.slice(3)));\nconst mac = {};\ntxt.split(\"\\n\").forEach(l => { const m = l.match(/^(\\d+\\.\\d+\\.\\d+\\.\\d+) .*lladdr ([0-9a-f:]{17})/i); if (m) { mac[m[1]] = m[2]; up.add(m[1]); } });\nconst self = (txt.match(/inet (\\d+\\.\\d+\\.\\d+\\.\\d+)/) || [])[1];\nif (self) up.delete(self);\nconst hosts = [...up].sort((a, b) => +a.split(\".\")[3] - +b.split(\".\")[3]);\nnode.status({ fill: \"blue\", shape: \"ring\", text: \"พบ \" + hosts.length + \" เครื่อง กำลังเช็ค port...\" });\n\nfunction probe(h, p) {\n    return new Promise(res => {\n        const s = new net.Socket(); let f = false;\n        const end = r => { if (f) return; f = true; s.destroy(); res(r); };\n        s.setTimeout(TMO);\n        s.once(\"connect\", () => end(true)); s.once(\"timeout\", () => end(false)); s.once(\"error\", () => end(false));\n        s.connect(p, h);\n    });\n}\n(async () => {\n    const rows = [];\n    await Promise.all(hosts.map(async h => {\n        const open = [];\n        for (const p of PORTS) if (await probe(h, p)) open.push(p);\n        let guess = \"\";\n        if (open.includes(502) || open.includes(5000) || open.includes(5001) || open.includes(5002)) guess = \"อ่านได้ (SLMP/Modbus?)\";\n        else if (open.includes(5015)) guess = \"น่าจะเป็นจอ GOT\";\n        else if (open.includes(5562)) guess = \"MELSOFT (PLC ยังไม่เปิด SLMP?)\";\n        else if (!open.length) guess = \"ไม่มี port เปิด (PLC ยังไม่ตั้ง SLMP / อุปกรณ์อื่น)\";\n        rows.push({ ip: h, mac: mac[h] || \"-\", open: open.join(\", \") || \"-\", guess });\n    }));\n    rows.sort((a, b) => +a.ip.split(\".\")[3] - +b.ip.split(\".\")[3]);\n    node.status({ fill: \"green\", shape: \"dot\", text: \"พบ \" + rows.length + \" เครื่องในวง 192.168.0.x\" });\n    node.send({ topic: \"อุปกรณ์ในวง 192.168.0.x (กล่องนี้ = \" + (self || \"?\") + \")\", payload: rows });\n})();\nreturn null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "net",
+        "module": "net"
+      }
+    ],
+    "x": 580,
+    "y": 100,
+    "wires": [
+      [
+        "7d6bf5c3fdd977d9"
+      ]
+    ]
+  },
+  {
+    "id": "7d6bf5c3fdd977d9",
+    "type": "debug",
+    "z": "c111b94f88c0190f",
+    "name": "อุปกรณ์ในวง",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 790,
+    "y": 100,
+    "wires": []
+  }
+]

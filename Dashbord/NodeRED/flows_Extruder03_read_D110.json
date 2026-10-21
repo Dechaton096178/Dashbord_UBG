@@ -1,0 +1,101 @@
+[
+  {
+    "id": "7b2d00000000b001",
+    "type": "tab",
+    "label": "Ex03 อ่าน D110",
+    "disabled": false,
+    "info": "อ่าน PRODUCTION NAME ที่ D110 ทุก 1 วินาที (ส่ง debug เมื่อค่าเปลี่ยน)"
+  },
+  {
+    "id": "7b2d00000000b002",
+    "type": "inject",
+    "z": "7b2d00000000b001",
+    "name": "อ่าน D110 ทุก 1 วิ",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "1",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "2",
+    "topic": "",
+    "payload": "d110",
+    "payloadType": "str",
+    "x": 150,
+    "y": 80,
+    "wires": [
+      [
+        "7b2d00000000b004"
+      ]
+    ]
+  },
+  {
+    "id": "7b2d00000000b003",
+    "type": "inject",
+    "z": "7b2d00000000b001",
+    "name": "อ่านทุกจุดที่เจอ CG (กด)",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "all",
+    "payloadType": "str",
+    "x": 170,
+    "y": 140,
+    "wires": [
+      [
+        "7b2d00000000b004"
+      ]
+    ]
+  },
+  {
+    "id": "7b2d00000000b004",
+    "type": "function",
+    "z": "7b2d00000000b001",
+    "name": "อ่าน D110 (FINS)",
+    "func": "// @ts-nocheck\n// ===== อ่านค่า D110 (PRODUCTION NAME) จาก PLC Omron NJ ด้วย FINS UDP (อ่านอย่างเดียว) =====\n// ส่งออกเฉพาะเมื่อค่าเปลี่ยน -> คีย์ค่าใหม่บนจอ HMI + ENT แล้วดู debug ได้ทันที\n// msg.payload = \"all\" -> อ่านทุกจุดที่เคยเจอ \"CG\" (D110, D210, D1000, D1012, D1236) ส่งออกทุกครั้ง\nconst HOST = \"192.168.250.1\", DA1 = 1, SA1 = 50;   // SA1 = เลขท้าย IP กล่อง (192.168.250.50)\nconst LEN = 5;                                     // อ่าน 5 word = 10 ตัวอักษร\nconst ADDRS = msg.payload === \"all\" ? [110, 210, 1000, 1012, 1236] : [110];\n\nlet S = context.get(\"S\");\nif (!S) {\n    const sock = dgram.createSocket(\"udp4\");\n    S = { sock, pending: null, sid: 0 };\n    sock.on(\"message\", r => { if (S.pending && r.length >= 14 && r[9] === S.sid) S.pending(null, r); });\n    sock.on(\"error\", e => S.pending && S.pending(\"socket \" + e.code));\n    sock.bind(0);\n    context.set(\"S\", S);\n}\nif (S.busy) return null;\nS.busy = true;\n\nfunction read(start, count) {\n    return new Promise(res => {\n        S.sid = (S.sid + 1) & 0xFF;\n        const t = setTimeout(() => S.pending && S.pending(\"timeout\"), 800);\n        S.pending = (err, r) => {\n            clearTimeout(t); S.pending = null;\n            if (err) return res({ err });\n            const ec = r.readUInt16BE(12);\n            if (ec !== 0 && ec !== 0x0040) return res({ err: \"end code 0x\" + ec.toString(16) });\n            const w = []; for (let k = 0; k < count; k++) w.push(r.readUInt16BE(14 + k * 2));\n            res({ w });\n        };\n        S.sock.send(Buffer.from([0x80, 0, 0x02, 0, DA1, 0, 0, SA1, 0, S.sid, 0x01, 0x01, 0x82,\n            (start >> 8) & 0xFF, start & 0xFF, 0, (count >> 8) & 0xFF, count & 0xFF]), 9600, HOST,\n            e => { if (e && S.pending) S.pending(\"send \" + e.code); });\n    });\n}\nconst ch = c => (c >= 32 && c < 127 ? String.fromCharCode(c) : \"\");\nconst nj = w => w.map(v => ch(v & 0xFF) + ch((v >> 8) & 0xFF)).join(\"\").trim();   // NJ (สลับ byte)\nconst nm = w => w.map(v => ch((v >> 8) & 0xFF) + ch(v & 0xFF)).join(\"\").trim();   // ปกติ\n\n(async () => {\n    const out = {};\n    for (const a of ADDRS) {\n        const r = await read(a, LEN);\n        if (r.err) { out[\"D\" + a] = { error: r.err }; continue; }\n        out[\"D\" + a] = {\n            \"ข้อความ (NJ)\": nj(r.w),\n            \"ข้อความ (ปกติ)\": nm(r.w),\n            \"เลข (word แรก)\": r.w[0],\n            \"ค่าดิบ\": r.w.map((v, i) => \"D\" + (a + i) + \"=\" + v + \" (0x\" + v.toString(16).padStart(4, \"0\") + \")\")\n        };\n    }\n    S.busy = false;\n    const d = out[\"D110\"];\n    node.status(d && !d.error ? { fill: \"green\", shape: \"dot\", text: \"D110 = \\\"\" + d[\"ข้อความ (NJ)\"] + \"\\\"  (word=\" + d[\"เลข (word แรก)\"] + \")\" }\n                              : { fill: \"red\", shape: \"ring\", text: \"D110: \" + (d ? d.error : \"-\") });\n    const key = JSON.stringify(out);\n    if (msg.payload !== \"all\" && context.get(\"last\") === key) return;   // ค่าเดิม ไม่ส่งซ้ำ\n    context.set(\"last\", key);\n    node.send({ payload: Object.assign({ time: new Date().toLocaleTimeString(\"th-TH\") }, out) });\n})();\nreturn null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "const S = context.get(\"S\");\nif (S) try { S.sock.close(); } catch (e) {}",
+    "libs": [
+      {
+        "var": "dgram",
+        "module": "dgram"
+      }
+    ],
+    "x": 410,
+    "y": 110,
+    "wires": [
+      [
+        "7b2d00000000b005"
+      ]
+    ]
+  },
+  {
+    "id": "7b2d00000000b005",
+    "type": "debug",
+    "z": "7b2d00000000b001",
+    "name": "ค่า D110",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 620,
+    "y": 110,
+    "wires": []
+  }
+]
