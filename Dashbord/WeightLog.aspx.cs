@@ -101,6 +101,7 @@ namespace Dashbord
 
             // รุ่น / Spec / ผล (จาก Node-RED)
             string model = Str(d, "model");
+            if (string.Equals(model, "Default", StringComparison.OrdinalIgnoreCase)) model = OeeDb.NOT_SCANNED;   // flow Node-RED รุ่นเก่ายังส่ง "Default" มา
             double mn, mx; double? specMin = null, specMax = null;
             if (double.TryParse(Str(d, "min"), NumberStyles.Float, CultureInfo.InvariantCulture, out mn)) specMin = mn;
             if (double.TryParse(Str(d, "max"), NumberStyles.Float, CultureInfo.InvariantCulture, out mx)) specMax = mx;
@@ -108,12 +109,16 @@ namespace Dashbord
             if (result != "OK" && result != "NG") result = (specMin.HasValue && specMax.HasValue) ? (w >= specMin.Value && w <= specMax.Value ? "OK" : "NG") : null;
 
             long id;
-            string err = OeeDb.InsertWeight(machine, w, unit, stable, Str(d, "text"), model, Str(d, "barcode"), specMin, specMax, result, out id);
+            string err = OeeDb.InsertWeight(machine, w, unit, stable, FixText(Str(d, "text")), model, Str(d, "barcode"), specMin, specMax, result, out id);
             if (err == "dup") { Reply(200, new { ok = true, skipped = "duplicate" }); return; }
             if (err != null) { Reply(500, new { ok = false, error = err }); return; }
             Reply(200, new { ok = true, id = id });
         }
 
+        static string FixText(string t)   // flow รุ่นเก่า: "Default | ST,+..." -> "Not ScanBarcode | ST,+..."
+        {
+            return t != null && t.StartsWith("Default |", StringComparison.OrdinalIgnoreCase) ? OeeDb.NOT_SCANNED + t.Substring(7) : t;
+        }
         static string Str(Dictionary<string, object> d, string k)
         {
             object o; return d.TryGetValue(k, out o) && o != null ? Convert.ToString(o, CultureInfo.InvariantCulture).Trim() : null;

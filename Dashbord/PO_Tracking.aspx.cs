@@ -200,6 +200,9 @@ namespace Dashbord
                                 OutRows = Convert.ToInt32(r["OutRows"]), OutSum = Convert.ToInt64(r["OutD"]),
                                 FirstOut = r["FirstOut"] == DBNull.Value ? (DateTime?)null : Convert.ToDateTime(r["FirstOut"])
                             };
+                            // NG : บาง Process (เช่น 11---05 ตรวจ Manual) ERP บันทึก NG ไว้ที่ DEFECTQTY แต่ ALERADYDEFECTQTY = 0
+                            //      (ตัวอย่าง 5101-2026091805_109 : In 1617 · Out 1580 · DEFECTQTY 37 · ALERADYDEFECTQTY 0) -> ใช้ค่าที่มากกว่า
+                            if (s.Defect > s.Ng) s.Ng = s.Defect;
                             if (!s.In.HasValue && !s.Out.HasValue) continue;
                             steps.Add(s);
                         }

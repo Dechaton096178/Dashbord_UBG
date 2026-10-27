@@ -1,0 +1,139 @@
+[
+    {
+        "id": "e7b34ebd5f8b4b6e",
+        "type": "tab",
+        "label": "FX3U ผ่าน Waveshare (Computer Link)",
+        "disabled": false,
+        "info": ""
+    },
+    {
+        "id": "9a823a55dccb49a2",
+        "type": "comment",
+        "z": "e7b34ebd5f8b4b6e",
+        "name": "① แก้ IP ของ Waveshare ในโหนด 'Waveshare TCP' · ② แก้รายการ D/M ที่จะอ่านในโหนด 'สร้างคำสั่ง' · ③ Deploy แล้วดู Debug",
+        "x": 420,
+        "y": 40,
+        "wires": []
+    },
+    {
+        "id": "71598cfb2d62484b",
+        "type": "inject",
+        "z": "e7b34ebd5f8b4b6e",
+        "name": "ทุก 1 วินาที",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "1",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "3",
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 130,
+        "y": 120,
+        "wires": [
+            [
+                "49c507f8eb1249f3"
+            ]
+        ]
+    },
+    {
+        "id": "49c507f8eb1249f3",
+        "type": "function",
+        "z": "e7b34ebd5f8b4b6e",
+        "name": "สร้างคำสั่ง (WR / BR)",
+        "func": "// @ts-nocheck\n// ===== FX3U Computer Link (Dedicated Protocol, Format 1) ผ่าน Waveshare TCP =====\n// PLC : FX3U-232-BD · 9600 · 7 bit · Even · 1 Stop · Station 00 · Sum check ON\n// แก้รายการที่จะอ่านในตารางนี้ แล้ว Deploy (อ่านทีละบล็อกวนไปเรื่อยๆ)\n//  dev: \"D\" = word (WR) · \"M\" / \"X\" / \"Y\" / \"T\" / \"C\" (bit) = อ่านแบบ bit (BR)\n//  X / Y ใช้เลขฐาน 8 ตามป้าย PLC (X0–X7, X10–X17 …)\nconst BLOCKS = [\n    { name: \"D100-D109\", dev: \"D\", start: 100, count: 10 },\n    { name: \"M0-M15\",    dev: \"M\", start: 0,   count: 16 },\n];\nconst idx = (context.get(\"i\") || 0) % BLOCKS.length;\ncontext.set(\"i\", idx + 1);\nconst b = BLOCKS[idx];\nconst bit = b.dev !== \"D\";\nconst addr = (b.dev === \"X\" || b.dev === \"Y\") ? b.start.toString(8) : String(b.start);\nconst head = b.dev + addr.padStart(4, \"0\");\nconst cnt = b.count.toString(16).toUpperCase().padStart(2, \"0\");\nconst body = \"00\" + \"FF\" + (bit ? \"BR\" : \"WR\") + \"0\" + head + cnt;     // สถานี 00 · PC FF · คำสั่ง · wait 0\nlet sum = 0; for (const ch of body) sum += ch.charCodeAt(0);\nconst frame = \"\\x05\" + body + (sum & 0xFF).toString(16).toUpperCase().padStart(2, \"0\");\nmsg.block = b;\nmsg.payload = Buffer.from(frame, \"ascii\");\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 330,
+        "y": 120,
+        "wires": [
+            [
+                "4b73448f7b15481f"
+            ]
+        ]
+    },
+    {
+        "id": "4b73448f7b15481f",
+        "type": "tcp request",
+        "z": "e7b34ebd5f8b4b6e",
+        "name": "Waveshare TCP",
+        "server": "192.168.100.200",
+        "port": "4196",
+        "out": "time",
+        "ret": "buffer",
+        "splitc": "300",
+        "newline": "",
+        "trim": false,
+        "tls": "",
+        "x": 540,
+        "y": 120,
+        "wires": [
+            [
+                "b9054ec430db4e00"
+            ]
+        ]
+    },
+    {
+        "id": "b9054ec430db4e00",
+        "type": "function",
+        "z": "e7b34ebd5f8b4b6e",
+        "name": "ถอดค่า",
+        "func": "// @ts-nocheck\n// ===== ถอดคำตอบจาก FX3U =====\n// ปกติ : STX 00 FF <ข้อมูล> ETX <sum>  · ผิดพลาด : NAK 00 FF <รหัส error 2 หลัก>\nconst b = msg.block || {};\nconst s = Buffer.isBuffer(msg.payload) ? msg.payload.toString(\"ascii\") : String(msg.payload || \"\");\nconst fail = (t) => { const n = (context.get(\"fail\") || 0) + 1; context.set(\"fail\", n);\n    node.status({ fill: \"red\", shape: \"ring\", text: b.name + \" · \" + t + \" (\" + n + \")\" }); return null; };\nif (!s.length) return fail(\"ไม่มีคำตอบ (เช็คสาย/ค่า 9600 7E1 / Dedicated Protocol)\");\nif (s.charCodeAt(0) === 0x15) return fail(\"NAK error \" + s.substr(5, 2));\nconst st = s.indexOf(\"\\x02\"), et = s.indexOf(\"\\x03\", st + 1);\nif (st < 0 || et < 0) return fail(\"คำตอบไม่ครบ: \" + JSON.stringify(s));\nconst data = s.substring(st + 5, et);                       // ตัด STX + \"00FF\"\nconst out = {};\nif (b.dev === \"D\") {\n    for (let k = 0; k < b.count; k++) {\n        const hx = data.substr(k * 4, 4); if (hx.length < 4) break;\n        let v = parseInt(hx, 16); if (v > 32767) v -= 65536;  // 16-bit มีเครื่องหมาย\n        out[\"D\" + (b.start + k)] = v;\n    }\n} else {\n    const oct = b.dev === \"X\" || b.dev === \"Y\";\n    for (let k = 0; k < b.count && k < data.length; k++)\n        out[b.dev + (oct ? (b.start + k).toString(8) : (b.start + k))] = data[k] === \"1\";\n}\ncontext.set(\"fail\", 0);\nconst all = Object.assign(flow.get(\"fx3u\") || {}, out); flow.set(\"fx3u\", all);\nnode.status({ fill: \"green\", shape: \"dot\", text: b.name + \" OK · \" + new Date().toLocaleTimeString() });\nreturn { payload: out, block: b.name, all };",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 710,
+        "y": 120,
+        "wires": [
+            [
+                "9d0a686ae8284994",
+                "25f0e453b9c94965"
+            ]
+        ]
+    },
+    {
+        "id": "9d0a686ae8284994",
+        "type": "debug",
+        "z": "e7b34ebd5f8b4b6e",
+        "name": "ค่าที่อ่านได้ (รอบนี้)",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 920,
+        "y": 100,
+        "wires": []
+    },
+    {
+        "id": "25f0e453b9c94965",
+        "type": "debug",
+        "z": "e7b34ebd5f8b4b6e",
+        "name": "ค่าทั้งหมดล่าสุด",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "all",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 910,
+        "y": 150,
+        "wires": []
+    }
+]

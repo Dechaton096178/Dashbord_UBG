@@ -59,6 +59,25 @@ namespace Dashbord
             return list;
         }
 
+        // =========================================================
+        // OEE Dashboard แยกตาม Process : Process ที่มีผังโรงงานแล้ว -> หน้าผัง (Layout) · ที่เหลือ -> กระดาน OEE_Dashboard.aspx?proc=...
+        // =========================================================
+        static readonly Dictionary<string, string> OeeLayoutPages = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) {
+            { "Injection", "InjectionLayout.aspx" },     // ผัง Injection PVC (รวม Seam buffing ที่อยู่ห้องเดียวกัน)
+            { "Seambuffing", "InjectionLayout.aspx" },
+        };
+
+        static List<MenuItem> OeePages()
+        {
+            var list = new List<MenuItem> { new MenuItem("All machines", "OEE_Dashboard.aspx") };
+            foreach (string p in Processes)
+            {
+                string url;
+                list.Add(new MenuItem(p, OeeLayoutPages.TryGetValue(p, out url) ? url : "OEE_Dashboard.aspx?proc=" + Uri.EscapeDataString(p)));
+            }
+            return list;
+        }
+
         public class Dept
         {
             public string Name;
@@ -73,6 +92,7 @@ namespace Dashbord
                 Icon = "M3 21V10l6-4v4l6-4v4l6-4v15H3z M7 17h2 M11 17h2 M15 17h2",
                 Items = new List<MenuItem> {
                     new MenuItem("Production Dashboard", "ProductionDashboard.aspx", ProductionPages()),   // กดแล้วกางเมนูย่อยตามแผนก
+                    new MenuItem("Summary by Process", "HourlySummary.aspx"),   // ยอดผลิตรายชั่วโมงแต่ละ Process / เครื่อง
                     new MenuItem("PO Tracking", "PO_Tracking.aspx"),          // PO นี้ผลิตถึง Process ไหนแล้ว
                     new MenuItem("Weight Log", "WeightLog.aspx"),             // น้ำหนักจากเครื่องชั่ง (Extruder03 ...)
                     new MenuItem("Daily Production Report", null),
@@ -96,7 +116,7 @@ namespace Dashbord
                 Name = "OEE",
                 Icon = "M4 19a8 8 0 1 1 16 0 M12 19l4-6 M4 19h16",
                 Items = new List<MenuItem> {
-                    new MenuItem("OEE Dashboard", "OEE_Dashboard.aspx"),
+                    new MenuItem("OEE Dashboard", "InjectionLayout.aspx", OeePages()),   // กดแล้วกางเมนูย่อยตาม Process (เหมือน MC Monitor)
                     new MenuItem("MC Monitor", "CounterMachine.aspx", McMonitorPages()),   // กดแล้วกางเมนูย่อยตาม Process
                     new MenuItem("Availability / Performance / Quality", null),
                     new MenuItem("Downtime Analysis", null),
@@ -145,14 +165,11 @@ namespace Dashbord
                 }
             },
             new Dept {
-                Name = "Accounting",
-                Icon = "M5 3h14v18H5z M8 7h8 M8 11h2 M14 11h2 M8 15h2 M14 15h2 M8 18h2 M14 18h2",
+                Name = "IT",
+                Icon = "M3 4h18v12H3z M8 20h8 M12 16v4 M7 8h4 M7 11h7",
                 Items = new List<MenuItem> {
-                    new MenuItem("Accounts Payable (AP)", null),
-                    new MenuItem("Accounts Receivable (AR)", null),
-                    new MenuItem("Invoice / Billing", null),
-                    new MenuItem("Production Cost", null),
-                    new MenuItem("Financial Report", null),
+                    new MenuItem("Hardware List", "Hardware.aspx"),          // รายการอุปกรณ์ (Raspberry pi, IOT BOX ...) + Online + Import Excel
+                    new MenuItem("Email List", "EmailList.aspx"),             // รายชื่ออีเมลบริษัท (ไม่เก็บรหัสผ่าน)
                 }
             },
             new Dept {

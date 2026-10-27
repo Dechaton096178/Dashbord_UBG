@@ -310,6 +310,22 @@
     .dt-tl { position:relative; height:26px; border-radius:8px; overflow:hidden; background:var(--track); display:flex; margin:4px 0 4px; }
     .dt-tl i { display:block; height:100%; }
     .dt-tl i.run { background:var(--run); } .dt-tl i.idle { background:var(--idle); } .dt-tl i.down { background:var(--down); } .dt-tl i.off { background:var(--off); } .dt-tl i.none { background:transparent; }
+    .dt-ht { width:100%; table-layout:fixed; border-collapse:collapse; margin:4px 0 10px; font-variant-numeric:tabular-nums; }
+    .dt .dt-ht th, .dt .dt-ht td { position:static; border:1px solid var(--line); padding:5px 2px; text-align:center; font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .dt .dt-ht th { background:var(--card2); color:var(--mute); font-weight:800; letter-spacing:0; text-transform:none; }
+    .dt .dt-ht td { font-weight:800; color:var(--ink); font-size:12px; }
+    .dt .dt-ht td.zero { color:var(--mute); font-weight:600; }
+    .dt .dt-ht td.cur, .dt .dt-ht th.cur { background:rgba(99,102,241,.16); }
+    .dt .dt-ht td.best { color:#34d399; }
+    .dt .dt-ht .tot { background:rgba(99,102,241,.22); color:var(--ink); }
+    .dt-hr { display:grid; grid-template-columns:repeat(24, 1fr); gap:2px; align-items:end; height:58px; margin:2px 0 4px; }
+    .dt-hr div { display:flex; flex-direction:column; justify-content:flex-end; align-items:center; height:100%; min-width:0; }
+    .dt-hr b { font-size:10px; font-weight:800; color:var(--ink); line-height:1.1; white-space:nowrap; font-variant-numeric:tabular-nums; }
+    .dt-hr i { display:block; width:100%; border-radius:3px 3px 0 0; background:#6366f1; min-height:2px; margin-top:2px; }
+    .dt-hr div.cur i { background:#a5b4fc; } .dt-hr div.zero b { color:var(--mute); font-weight:600; }
+    .dt-hr div.fut i { background:transparent; }
+    .dt-hrsum { display:flex; justify-content:space-between; font-size:11.5px; color:var(--mute); margin:6px 0 2px; }
+    .dt-hrsum b { color:var(--ink); }
     .dt-ax { display:flex; justify-content:space-between; font-size:10.5px; color:var(--mute); margin-bottom:14px; }
     .dt h4 { margin:14px 0 8px; font-size:13px; font-weight:800; }
     .dt-bar { height:8px; border-radius:99px; background:var(--track); overflow:hidden; min-width:60px; }
@@ -1118,7 +1134,27 @@
                 pos = Math.max(pos, b);
             });
             var ax = [0, 4, 8, 12, 16, 20, 24].map(function (h) { return '<span>' + ('0' + ((8 + h) % 24)).slice(-2) + ':00</span>'; }).join('');
-            var tl = '<h4>Production Day Timeline (08:00 – 08:00)</h4><div class="dt-tl">' + segs.join('') + '</div><div class="dt-ax">' + ax + '</div>';
+            // ยอดผลิตรายชั่วโมง (เหนือ Timeline) : วันนี้ใช้ค่าสดจากเครื่อง · วันก่อนใช้ค่าที่บันทึกใน DB (mc_hourly) · ชิ้น = Shot × Cavity
+            var mcNow = (lastData && lastData.machines || []).filter(function (x) { return x.machine === d.machine; })[0];
+            var cav = mcNow && mcNow.cavities > 0 ? mcNow.cavities : 1;
+            var isToday = mcNow && String(d.dayStart).slice(0, 10) === String(lastData.dayStart || '').slice(0, 10);
+            var hs = (isToday && mcNow.hourly ? mcNow.hourly.map(function (h) { return h.shots || 0; }) : (d.hours || [])).slice(0, 24);
+            while (hs.length < 24) hs.push(0);
+            var curH = Math.floor((nowT - t0) / 3600e3), hmax = 1, htot = 0, hbest = -1;
+            hs.forEach(function (v, i) { if (i <= curH) { hmax = Math.max(hmax, v); htot += v; if (hbest < 0 || v > hs[hbest]) hbest = i; } });
+            // ตารางยอดรายชั่วโมง : แถวบน = ชั่วโมง · แถวล่าง = ยอด (ชิ้น) · ชั่วโมงที่ยังไม่ถึงเว้นว่าง
+            var hth = '', htd = '';
+            hs.forEach(function (v, i) {
+                var fut = i > curH, lbl = ('0' + ((8 + i) % 24)).slice(-2) + ':00', c = i === curH ? ' class="cur"' : '';
+                hth += '<th' + c + '>' + lbl + '</th>';
+                htd += '<td class="' + (i === curH ? 'cur ' : '') + (!fut && v === 0 ? 'zero ' : '') + (i === hbest && v ? 'best' : '') + '" title="' + lbl + ' · ' + fmt(v) + ' shots' + (cav > 1 ? ' × ' + cav + ' = ' + fmt(v * cav) + ' pcs' : '') + '">' +
+                       (fut ? '' : fmt(v * cav)) + '</td>';
+            });
+            var hr = '<table class="dt-ht"><thead><tr>' + hth + '<th class="tot" style="width:6%">Total</th></tr></thead><tbody><tr>' + htd + '<td class="tot">' + fmt(htot * cav) + '</td></tr></tbody></table>';
+            var hrSum = '<div class="dt-hrsum"><span>Output per hour (' + (cav > 1 ? 'pcs = shots × ' + cav + ' cavities' : 'shots') + ')</span><span>Total <b>' + fmt(htot * cav) + '</b>' +
+                (hbest >= 0 && hs[hbest] ? ' · best ' + ('0' + ((8 + hbest) % 24)).slice(-2) + ':00 <b>' + fmt(hs[hbest] * cav) + '</b>' : '') +
+                ' · avg <b>' + fmt(curH >= 0 ? htot * cav / Math.max(1, Math.min(24, curH + 1)) : 0) + '</b>/h</span></div>';
+            var tl = '<h4>Production Day Timeline (08:00 – 08:00)</h4>' + hrSum + hr + '<div class="dt-tl">' + segs.join('') + '</div><div class="dt-ax">' + ax + '</div>';
             // ตารางเครื่องหยุด เรียงตามนานสุด
             var maxS = stops.reduce(function (a, e) { return Math.max(a, e.sec); }, 1);
             var srows = stops.slice().sort(function (a, b) { return b.sec - a.sec; }).map(function (e) {

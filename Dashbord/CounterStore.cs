@@ -71,6 +71,28 @@ namespace Dashbord
         public const string API_KEY = "";          // ถ้าใส่ค่า ผู้ส่งต้องแนบ header X-Api-Key ให้ตรง
         public const int DAY_START_HOUR = 8;       // วันผลิตเริ่ม 08:00
         public const int MAX_GAP_SEC = 300;        // ช่วงห่างเกิน 5 นาทีไม่นำมาคิดเวลา
+
+        // ---- เวลาพัก (ไม่นำมาคิด OEE) · แก้ / เพิ่มช่วงได้ที่นี่ ----
+        //   กลางวัน : พนักงานสลับเบรค (11–12 / 12–13) เครื่องต้องเดินต่อ -> ไม่ตัด (2026-10-26)
+        //   กลางคืน : 00:00–01:00 พักพร้อมกัน -> ตัดออก
+        public static readonly TimeSpan[][] BREAKS = {
+            new[] { new TimeSpan(0, 0, 0),  new TimeSpan(1, 0, 0) },
+        };
+
+        /// <summary>จำนวนวินาทีในช่วง [a, b) ที่ตรงกับเวลาพัก</summary>
+        public static double BreakOverlapSec(DateTime a, DateTime b)
+        {
+            if (b <= a) return 0;
+            double sec = 0;
+            for (DateTime day = a.Date.AddDays(-1); day <= b.Date; day = day.AddDays(1))
+                foreach (TimeSpan[] w in BREAKS)
+                {
+                    DateTime s0 = day + w[0], e0 = day + w[1];
+                    DateTime s1 = s0 > a ? s0 : a, e1 = e0 < b ? e0 : b;
+                    if (e1 > s1) sec += (e1 - s1).TotalSeconds;
+                }
+            return sec;
+        }
         public const int STALE_SEC = 30;           // ไม่มีข้อมูลเกิน 30 วินาที = ขาดการติดต่อ
         public const long MAX_SHOT_DELTA = 1000;   // กันค่ากระโดดผิดปกติต่อ 1 ครั้งที่ส่ง
 
@@ -317,6 +339,7 @@ namespace Dashbord
                 m.LastUpdate = now;
                 Machines[id] = m;
             }
+            double sinceLastSec = Math.Max(0, (now - m.LastUpdate).TotalSeconds);   // ใช้ตรวจยอด Shot ว่าเป็นไปได้จริงไหม (ข้อ 4)
 
             // 1) นับเวลาที่ผ่านไปตามสถานะ "ก่อนหน้า"
             if (m.LastMode != null)
@@ -326,9 +349,12 @@ namespace Dashbord
                 {
                     int hg = (int)Math.Floor((now - dayStart).TotalHours);
                     bool sameDay = m.ProdDay == dayKey && hg >= 0 && hg < 24;
+                    // เวลาพัก (BREAKS) : เครื่องหยุด / Offline ช่วงพักไม่นับเป็นเวลาสูญเสีย (ไม่นำมาคิด OEE) · ถ้าเครื่องเดินช่วงพักยังนับเป็นเวลาเดิน
+                    double brk = m.LastMode == "operating" ? 0 : BreakOverlapSec(m.LastUpdate, now);
+                    double cnt = Math.Max(0, gap - brk);
                     if (m.LastMode == "operating") { m.OperatingSec += gap; if (sameDay) m.HourOp[hg] += gap; }
-                    else if (m.LastMode == "loss") { m.LossSec += gap; if (sameDay) m.HourLoss[hg] += gap; }
-                    else { m.OfflineSec += gap; if (sameDay) m.HourOff[hg] += gap; }
+                    else if (m.LastMode == "loss") { m.LossSec += cnt; if (sameDay) m.HourLoss[hg] += cnt; }
+                    else { m.OfflineSec += cnt; if (sameDay) m.HourOff[hg] += cnt; }
                 }
             }
 
@@ -372,7 +398,16 @@ namespace Dashbord
                 if (m.LastShot.HasValue)
                 {
                     long delta = m.ShotCount.Value - m.LastShot.Value;
-                    if (delta < 0) delta = m.ShotCount.Value;            // Counter ถูกรีเซ็ต / เปลี่ยน Job
+                    // จำนวน Shot ที่ฉีดได้จริงในช่วงเวลานี้ (เร็วสุด = ครึ่งหนึ่งของ Std CT) · ไม่มี Std CT = ไม่จำกัด (ใช้ MAX_SHOT_DELTA)
+                    double ct = m.StdCt.HasValue && m.StdCt.Value > 0 ? m.StdCt.Value : 0;
+                    long maxReal = ct > 0 ? (long)Math.Ceiling(Math.Max(sinceLastSec, 1) / (ct * 0.5)) + 2 : MAX_SHOT_DELTA;
+                    if (delta < 0)
+                    {
+                        // Counter ลดลง : รีเซ็ตเป็น 0 แล้วฉีดต่อ -> นับค่าใหม่ · แต่ถ้าค่าใหม่มากกว่าที่ฉีดได้จริง
+                        // (เช่น เปลี่ยน Job แล้ว HMI แสดงยอดของ Job อื่น 80, 110 ...) -> ไม่นับ แค่ตั้งฐานใหม่ (2026-10-27 แก้ยอดรายชั่วโมงเกิน)
+                        delta = m.ShotCount.Value <= maxReal ? m.ShotCount.Value : 0;
+                    }
+                    else if (delta > maxReal) delta = 0;                 // กระโดดขึ้นเกินที่เป็นไปได้ (เปลี่ยน Job / ค่าผิดปกติ) -> ไม่นับ
                     if (delta < 0 || delta > MAX_SHOT_DELTA) delta = 0;  // ค่าผิดปกติ ไม่นับ
                     if (delta > 0)
                     {
@@ -615,6 +650,273 @@ namespace Dashbord
             if (!string.IsNullOrEmpty(s) && DateTime.TryParseExact(s, "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture, DateTimeStyles.None, out t))
                 return t;
             return null;
+        }
+
+        // ------------------------------------------------------------ ยอดรายชั่วโมงทุกเครื่องของวันผลิต (หน้า HourlySummary.aspx)
+        public class HourMc { public string Machine, Process, MachineNo; public int Cav; public long[] Shots = new long[24]; }
+
+        /// <summary>Shot รายชั่วโมงของทุกเครื่องในวันผลิต (index 0 = 08:00) จาก mc_hourly · Cavity = pieces/shots ของวันนั้น (ไม่มี -> ตาราง machine)</summary>
+        public static List<HourMc> HourlyAll(DateTime dayStart, out string error)
+        {
+            error = null;
+            var map = new Dictionary<string, HourMc>(StringComparer.OrdinalIgnoreCase);
+            if (!Init()) { error = LastError ?? "DB not configured"; return new List<HourMc>(); }
+            try
+            {
+                using (DbConnection c = Open())
+                using (DbDataReader rd = Cmd(c, null, @"
+                        SELECT h.machine_code, h.hour_start, h.shots, m.process, m.cavities, m.machine_no, d.shots_today, d.pieces_today
+                          FROM mc_hourly h
+                          LEFT JOIN machine m  ON m.machine_code = h.machine_code
+                          LEFT JOIN mc_daily d ON d.machine_code = h.machine_code AND d.prod_day = h.prod_day
+                         WHERE h.prod_day = @pd", "@pd", dayStart.Date).ExecuteReader())
+                    while (rd.Read())
+                    {
+                        string mc = rd.GetString(0);
+                        HourMc x;
+                        if (!map.TryGetValue(mc, out x))
+                        {
+                            x = new HourMc { Machine = mc };
+                            x.Process = rd.IsDBNull(3) ? null : rd.GetString(3);
+                            x.MachineNo = rd.IsDBNull(5) ? null : rd.GetString(5);
+                            long st = rd.IsDBNull(6) ? 0 : Convert.ToInt64(rd.GetValue(6)), pc = rd.IsDBNull(7) ? 0 : Convert.ToInt64(rd.GetValue(7));
+                            int cavDb = rd.IsDBNull(4) ? 1 : Math.Max(1, Convert.ToInt32(rd.GetValue(4)));
+                            x.Cav = st > 0 && pc > 0 ? Math.Max(1, (int)Math.Round((double)pc / st)) : cavDb;
+                            map[mc] = x;
+                        }
+                        int h = (int)Math.Floor((Convert.ToDateTime(rd.GetValue(1)) - dayStart).TotalHours);
+                        if (h >= 0 && h < 24) x.Shots[h] = rd.IsDBNull(2) ? 0 : Convert.ToInt64(rd.GetValue(2));
+                    }
+            }
+            catch (Exception ex) { error = ex.Message; }
+            return new List<HourMc>(map.Values);
+        }
+
+        // ------------------------------------------------------------ IT Email list (หน้า EmailList.aspx)
+        //   it_email : 1 แถว = 1 บัญชีอีเมล (ไม่เก็บรหัสผ่าน)
+        static bool _emTable;
+        public static readonly string[] EM_FIELDS = { "item_no", "email", "mail_type", "position", "name_th", "name_en", "emp_code", "remark", "status" };
+        const string EM_SEED = @"[{""no"": 1, ""email"": ""admin@universalbasegolfball.onmicrosoft.com"", ""type"": ""Microsoft 365"", ""pos"": ""Admin"", ""th"": ""ปัทมวรรณ กวางทุม"", ""en"": ""Pattamawan Kwangtum"", ""code"": """", ""remark"": """", ""status"": ""Active""}, {""no"": 2, ""email"": ""Planning@universalbasegolfball.com"", ""type"": ""Microsoft 365"", ""pos"": ""แพลนนิ่ง"", ""th"": """", ""en"": """", ""code"": """", ""remark"": """", ""status"": ""Active""}, {""no"": 3, ""email"": """", ""type"": ""Microsoft 365"", ""pos"": ""จัดซื้อ"", ""th"": ""พี่เจี๊ยบ"", ""en"": """", ""code"": """", ""remark"": """", ""status"": ""Active""}, {""no"": 4, ""email"": """", ""type"": ""Microsoft 365"", ""pos"": ""บัญชี"", ""th"": ""พี่พจน์"", ""en"": """", ""code"": """", ""remark"": """", ""status"": ""Active""}, {""no"": 5, ""email"": ""hr@universalbasegolfball.com"", ""type"": ""Microsoft 365"", ""pos"": ""ฝ่ายบุคคล"", ""th"": """", ""en"": """", ""code"": """", ""remark"": """", ""status"": ""Active""}, {""no"": 6, ""email"": ""lab@universalbasegolfball.com"", ""type"": ""Microsoft 365"", ""pos"": ""ห้องแลป"", ""th"": """", ""en"": """", ""code"": """", ""remark"": """", ""status"": ""Active""}, {""no"": 7, ""email"": """", ""type"": ""Microsoft 365"", ""pos"": ""IPQC Mold"", ""th"": """", ""en"": """", ""code"": """", ""remark"": """", ""status"": ""Active""}, {""no"": 8, ""email"": """", ""type"": ""Microsoft 365"", ""pos"": ""IPQC Finished"", ""th"": """", ""en"": """", ""code"": """", ""remark"": """", ""status"": ""Active""}, {""no"": 9, ""email"": ""coremolding@universalbasegolfball.com"", ""type"": ""Microsoft 365"", ""pos"": ""Core Mold"", ""th"": """", ""en"": """", ""code"": """", ""remark"": """", ""status"": ""Active""}, {""no"": 10, ""email"": ""washanddry@universalbasegolfball.com"", ""type"": ""Microsoft 365"", ""pos"": ""Wash and dry"", ""th"": """", ""en"": """", ""code"": """", ""remark"": """", ""status"": ""Active""}, {""no"": 11, ""email"": ""Planning2@universalbasegolfball.com"", ""type"": ""Microsoft 365"", ""pos"": ""Planning2"", ""th"": """", ""en"": """", ""code"": """", ""remark"": """", ""status"": ""Active""}, {""no"": 12, ""email"": ""im-ex@universalbasegolfball.com"", ""type"": ""Microsoft 365"", ""pos"": ""Im-ex"", ""th"": """", ""en"": """", ""code"": """", ""remark"": """", ""status"": ""Active""}, {""no"": 13, ""email"": ""qa@universalbasegolfball.com"", ""type"": ""Microsoft 365"", ""pos"": ""QA"", ""th"": """", ""en"": """", ""code"": """", ""remark"": """", ""status"": ""Active""}, {""no"": 14, ""email"": ""cfo@universalbasegolfball.com"", ""type"": ""Microsoft 365"", ""pos"": ""Jacy Chen"", ""th"": """", ""en"": """", ""code"": """", ""remark"": """", ""status"": ""Active""}, {""no"": 15, ""email"": ""safety@universalbasegolfball.com"", ""type"": ""Microsoft 365"", ""pos"": ""Safety"", ""th"": ""Mathurin Takhianram(Toey)"", ""en"": """", ""code"": """", ""remark"": """", ""status"": ""Active""}, {""no"": 16, ""email"": ""info@universalbasegolfball.com"", ""type"": ""Microsoft 365"", ""pos"": ""information"", ""th"": """", ""en"": """", ""code"": """", ""remark"": """", ""status"": ""Active""}, {""no"": 17, ""email"": ""it@universalbasegolfball.com"", ""type"": ""Microsoft 365"", ""pos"": """", ""th"": """", ""en"": """", ""code"": """", ""remark"": """", ""status"": ""Active""}, {""no"": 18, ""email"": ""mixing@universalbasegolfball.com"", ""type"": ""Microsoft 365"", ""pos"": """", ""th"": """", ""en"": """", ""code"": """", ""remark"": """", ""status"": ""Active""}, {""no"": 19, ""email"": ""Extruder@universalbasegolfball.com"", ""type"": ""Microsoft 365"", ""pos"": """", ""th"": """", ""en"": """", ""code"": """", ""remark"": """", ""status"": ""Active""}, {""no"": 20, ""email"": ""stamping@universalbasegolfball.com"", ""type"": ""Microsoft 365"", ""pos"": """", ""th"": """", ""en"": """", ""code"": """", ""remark"": """", ""status"": ""Active""}, {""no"": 21, ""email"": ""Packing@universalbasegolfball.com"", ""type"": ""Microsoft 365"", ""pos"": """", ""th"": """", ""en"": """", ""code"": """", ""remark"": """", ""status"": ""Active""}, {""no"": 22, ""email"": ""Accounting2@uuniversalbasegolfball.com"", ""type"": ""Microsoft 365"", ""pos"": ""KITSANA NAKPOMCHIN"", ""th"": """", ""en"": """", ""code"": """", ""remark"": """", ""status"": ""Active""}, {""no"": 23, ""email"": ""Accounting3@uuniversalbasegolfball.com"", ""type"": ""Microsoft 365"", ""pos"": ""Supaporn Paekamnerd"", ""th"": """", ""en"": """", ""code"": """", ""remark"": """", ""status"": ""Active""}, {""no"": 24, ""email"": ""store@universalbasegolfball.com"", ""type"": ""Microsoft 365"", ""pos"": """", ""th"": """", ""en"": """", ""code"": """", ""remark"": """", ""status"": ""Active""}, {""no"": 25, ""email"": ""asst.manager@universalbasegolfball.com"", ""type"": ""Microsoft 365"", ""pos"": """", ""th"": """", ""en"": """", ""code"": """", ""remark"": """", ""status"": ""Active""}, {""no"": 26, ""email"": ""factory.mgr@universalbasegolfball.com"", ""type"": ""Microsoft 365"", ""pos"": ""Chin-Chun Yu"", ""th"": """", ""en"": """", ""code"": """", ""remark"": """", ""status"": ""Active""}, {""no"": 27, ""email"": ""ipqc.core@universalbasegolfball.com"", ""type"": ""Microsoft 365"", ""pos"": """", ""th"": """", ""en"": """", ""code"": """", ""remark"": """", ""status"": ""Active""}, {""no"": 28, ""email"": ""ipqc.glebar@universalbasegolfball.com"", ""type"": ""Microsoft 365"", ""pos"": """", ""th"": """", ""en"": """", ""code"": """", ""remark"": """", ""status"": ""Active""}, {""no"": 29, ""email"": ""Yiting.lin@universalbasegolfball.com"", ""type"": ""Microsoft 365"", ""pos"": """", ""th"": """", ""en"": """", ""code"": """", ""remark"": """", ""status"": ""Active""}, {""no"": 30, ""email"": ""pe@universalbasegolfball.com"", ""type"": ""Microsoft 365"", ""pos"": """", ""th"": """", ""en"": """", ""code"": """", ""remark"": """", ""status"": ""Active""}, {""no"": 31, ""email"": ""andy.lin@universalbasegolfball.com"", ""type"": ""Microsoft 365"", ""pos"": """", ""th"": """", ""en"": """", ""code"": """", ""remark"": """", ""status"": ""Active""}, {""no"": 32, ""email"": ""kevin.lin@universalbasegolfball.com"", ""type"": ""Microsoft 365"", ""pos"": """", ""th"": """", ""en"": """", ""code"": """", ""remark"": """", ""status"": ""Active""}, {""no"": 33, ""email"": ""sarena.li@universalbasegolfball.com"", ""type"": ""Microsoft 365"", ""pos"": """", ""th"": """", ""en"": """", ""code"": """", ""remark"": """", ""status"": ""Active""}, {""no"": 34, ""email"": ""iqc@universalbasegolfball.com"", ""type"": ""Microsoft 365"", ""pos"": """", ""th"": """", ""en"": """", ""code"": """", ""remark"": """", ""status"": ""Active""}, {""no"": 35, ""email"": ""im-ex2@universalbasegolfball.com"", ""type"": ""Microsoft 365"", ""pos"": """", ""th"": """", ""en"": """", ""code"": """", ""remark"": """", ""status"": ""Active""}, {""no"": 36, ""email"": ""maintenance@universalbasegolfball.com"", ""type"": ""Microsoft 365"", ""pos"": """", ""th"": """", ""en"": """", ""code"": """", ""remark"": """", ""status"": ""Active""}, {""no"": 37, ""email"": ""universal.ubg@gmail.com"", ""type"": ""Gmail"", ""pos"": """", ""th"": """", ""en"": """", ""code"": """", ""remark"": ""Serial R94Y40NB1MX · เมล์ล็อคอินในโทรศัพท์ออฟฟิศ SumsungA16"", ""status"": ""Active""}, {""no"": 38, ""email"": ""universalbasegolfball@gmail.com"", ""type"": ""Gmail"", ""pos"": """", ""th"": """", ""en"": """", ""code"": """", ""remark"": ""Serial R94Y40N7B0Z"", ""status"": ""Active""}, {""no"": 39, ""email"": ""ubgiot01@gmail.com"", ""type"": ""Gmail"", ""pos"": """", ""th"": """", ""en"": """", ""code"": """", ""remark"": ""เบอร์โทร 0947928182 เมล์สำรอง universal.ubg@gmail.com"", ""status"": ""Active""}, {""no"": 40, ""email"": ""Benny@universalbasegolfball.com"", ""type"": ""Microsoft 365"", ""pos"": """", ""th"": """", ""en"": """", ""code"": """", ""remark"": """", ""status"": ""Cancelled""}]";   // ข้อมูลตั้งต้นจาก Email_UBG.xlsx (2026-10-26) ไม่รวมรหัสผ่าน · ใช้ครั้งแรกตอนตารางว่างเท่านั้น
+
+        static void EnsureEmTable(DbConnection c)
+        {
+            if (_emTable) return;
+            Cmd(c, null, @"CREATE TABLE IF NOT EXISTS it_email (
+                              id          INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                              item_no     INT          NULL,
+                              email       VARCHAR(120) NULL,
+                              mail_type   VARCHAR(30)  NULL COMMENT 'Microsoft 365 / Gmail / ...',
+                              position    VARCHAR(80)  NULL COMMENT 'ตำแหน่ง / แผนก',
+                              name_th     VARCHAR(80)  NULL,
+                              name_en     VARCHAR(80)  NULL,
+                              emp_code    VARCHAR(30)  NULL COMMENT 'รหัสพนักงาน',
+                              remark      VARCHAR(300) NULL,
+                              status      VARCHAR(20)  NULL COMMENT 'Active / Cancelled',
+                              updated_at  DATETIME     NULL,
+                              updated_ip  VARCHAR(45)  NULL,
+                              PRIMARY KEY (id),
+                              KEY ix_email (email)
+                           ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4").ExecuteNonQuery();
+            if (Convert.ToInt32(Cmd(c, null, "SELECT COUNT(*) FROM it_email").ExecuteScalar(), CultureInfo.InvariantCulture) == 0)
+            {
+                var js = new System.Web.Script.Serialization.JavaScriptSerializer();
+                foreach (var r in js.Deserialize<List<Dictionary<string, object>>>(EM_SEED))
+                    Cmd(c, null, @"INSERT INTO it_email (item_no, email, mail_type, position, name_th, name_en, emp_code, remark, status, updated_at)
+                                   VALUES (@no, @e, @t, @p, @th, @en, @c, @r, @s, NOW())",
+                        "@no", r["no"], "@e", NullIfEmpty(Convert.ToString(r["email"])), "@t", NullIfEmpty(Convert.ToString(r["type"])),
+                        "@p", NullIfEmpty(Convert.ToString(r["pos"])), "@th", NullIfEmpty(Convert.ToString(r["th"])), "@en", NullIfEmpty(Convert.ToString(r["en"])),
+                        "@c", NullIfEmpty(Convert.ToString(r["code"])), "@r", NullIfEmpty(Convert.ToString(r["remark"])), "@s", NullIfEmpty(Convert.ToString(r["status"]))).ExecuteNonQuery();
+            }
+            _emTable = true;
+        }
+
+        public static List<Dictionary<string, object>> EmList()
+        {
+            if (!Init()) throw new Exception(LastError ?? "DB ยังไม่ได้ตั้งค่า");
+            var list = new List<Dictionary<string, object>>();
+            using (DbConnection c = Open())
+            {
+                EnsureEmTable(c);
+                using (DbDataReader r = Cmd(c, null, "SELECT * FROM it_email ORDER BY item_no IS NULL, item_no, id").ExecuteReader())
+                    while (r.Read())
+                    {
+                        var d = new Dictionary<string, object>();
+                        d["id"] = Convert.ToInt32(r["id"], CultureInfo.InvariantCulture);
+                        foreach (string f in EM_FIELDS) d[f] = r[f] == DBNull.Value ? "" : Convert.ToString(r[f], CultureInfo.InvariantCulture);
+                        d["updated_at"] = r["updated_at"] == DBNull.Value ? "" : Convert.ToDateTime(r["updated_at"], CultureInfo.InvariantCulture).ToString("yyyy-MM-dd HH:mm");
+                        list.Add(d);
+                    }
+            }
+            return list;
+        }
+
+        /// <summary>บันทึก (id = 0 → เพิ่มใหม่) · คืน id</summary>
+        public static int EmSave(int id, Dictionary<string, string> v, string ip)
+        {
+            if (!Init()) throw new Exception(LastError ?? "DB ยังไม่ได้ตั้งค่า");
+            string em, pos, th;
+            v.TryGetValue("email", out em); v.TryGetValue("position", out pos); v.TryGetValue("name_th", out th);
+            if (string.IsNullOrWhiteSpace(em) && string.IsNullOrWhiteSpace(pos) && string.IsNullOrWhiteSpace(th)) throw new Exception("ต้องใส่ Email หรือ ตำแหน่ง / ชื่อ อย่างน้อย 1 ช่อง");
+            var args = new List<object>();
+            foreach (string f in EM_FIELDS)
+            {
+                string s; v.TryGetValue(f, out s); s = (s ?? "").Trim();
+                object val = s.Length == 0 ? null : (object)s;
+                if (f == "item_no" && val != null)
+                {
+                    int n; if (!int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out n)) throw new Exception("No. ต้องเป็นตัวเลข");
+                    val = n;
+                }
+                int max = f == "remark" ? 300 : f == "email" ? 120 : f == "position" || f == "name_th" || f == "name_en" ? 80 : f == "status" ? 20 : 30;
+                if (val is string && ((string)val).Length > max) val = ((string)val).Substring(0, max);
+                args.Add("@" + f); args.Add(val);
+            }
+            args.Add("@uip"); args.Add(ip); args.Add("@id"); args.Add(id);
+            using (DbConnection c = Open())
+            {
+                EnsureEmTable(c);
+                if (id > 0)
+                {
+                    var sets = new List<string>(); foreach (string f in EM_FIELDS) sets.Add(f + " = @" + f);
+                    if (Cmd(c, null, "UPDATE it_email SET " + string.Join(", ", sets) + ", updated_at = NOW(), updated_ip = @uip WHERE id = @id", args.ToArray()).ExecuteNonQuery() == 0)
+                        throw new Exception("ไม่พบรายการ id " + id);
+                    return id;
+                }
+                var ps = new List<string>(); foreach (string f in EM_FIELDS) ps.Add("@" + f);
+                Cmd(c, null, "INSERT INTO it_email (" + string.Join(", ", EM_FIELDS) + ", updated_at, updated_ip) VALUES (" + string.Join(", ", ps) + ", NOW(), @uip)", args.ToArray()).ExecuteNonQuery();
+                return Convert.ToInt32(Cmd(c, null, "SELECT LAST_INSERT_ID()").ExecuteScalar(), CultureInfo.InvariantCulture);
+            }
+        }
+
+        public static void EmDelete(int id)
+        {
+            if (!Init()) throw new Exception(LastError ?? "DB ยังไม่ได้ตั้งค่า");
+            using (DbConnection c = Open())
+            {
+                EnsureEmTable(c);
+                Cmd(c, null, "DELETE FROM it_email WHERE id = @id", "@id", id).ExecuteNonQuery();
+            }
+        }
+
+        // ------------------------------------------------------------ IT Hardware (หน้า Hardware.aspx)
+        //   it_hardware : 1 แถว = อุปกรณ์ 1 ชิ้น (Raspberry pi, IOT BOX, PC, Switch ...) · แก้ไข / นำเข้า Excel จากหน้าเว็บ
+        static bool _hwTable;
+        public static readonly string[] HW_FIELDS = { "item_no", "name", "hw_type", "ip", "location", "owner", "serial_no", "start_date", "remark" };
+        const string HW_SEED = @"[{""no"": 1, ""name"": ""Raspberry pi"", ""type"": ""Raspberry pi"", ""ip"": ""192.168.33.77"", ""loc"": ""Office ชั้น 1"", ""owner"": ""IT"", ""sn"": """", ""start"": ""2026-10-22"", ""remark"": """"}, {""no"": 2, ""name"": ""Raspberry pi"", ""type"": ""Raspberry pi"", ""ip"": ""192.168.33.74"", ""loc"": ""Office ชั้น 1"", ""owner"": ""IT"", ""sn"": """", ""start"": ""2026-10-22"", ""remark"": """"}, {""no"": 3, ""name"": ""Raspberry pi"", ""type"": ""Raspberry pi"", ""ip"": ""192.168.33.78"", ""loc"": ""Office ชั้น 1"", ""owner"": ""IT"", ""sn"": """", ""start"": ""2026-10-22"", ""remark"": """"}, {""no"": 4, ""name"": ""Raspberry pi"", ""type"": ""Raspberry pi"", ""ip"": ""192.168.33.75"", ""loc"": ""Extruder03"", ""owner"": ""IT"", ""sn"": """", ""start"": ""2026-10-22"", ""remark"": """"}, {""no"": 5, ""name"": ""Raspberry pi"", ""type"": ""Raspberry pi"", ""ip"": ""192.168.33.61"", ""loc"": ""ห้อง Lab ชั้น 1"", ""owner"": ""IT"", ""sn"": """", ""start"": ""2026-10-22"", ""remark"": """"}, {""no"": 6, ""name"": ""Raspberry pi"", ""type"": ""Raspberry pi"", ""ip"": ""192.168.33.80"", ""loc"": ""Coating"", ""owner"": ""IT"", ""sn"": """", ""start"": ""2026-10-22"", ""remark"": """"}, {""no"": 7, ""name"": ""Raspberry pi"", ""type"": ""Raspberry pi"", ""ip"": ""192.168.33.79"", ""loc"": ""Injection"", ""owner"": ""IT"", ""sn"": """", ""start"": ""2026-10-22"", ""remark"": """"}, {""no"": 8, ""name"": ""Raspberry pi"", ""type"": ""Raspberry pi"", ""ip"": ""192.168.33.92"", ""loc"": ""Office ชั้น 1"", ""owner"": ""IT"", ""sn"": """", ""start"": ""2026-10-22"", ""remark"": """"}, {""no"": 9, ""name"": ""IOT BOX"", ""type"": ""IOT BOX"", ""ip"": ""10.121.15.233"", ""loc"": ""UB-MC-PV-1-1"", ""owner"": ""IT"", ""sn"": """", ""start"": ""2026-10-01"", ""remark"": """"}, {""no"": 10, ""name"": ""IOT BOX"", ""type"": ""IOT BOX"", ""ip"": ""10.121.15.78"", ""loc"": ""UB-MC-PV-1-2"", ""owner"": ""IT"", ""sn"": """", ""start"": ""2026-10-01"", ""remark"": """"}, {""no"": 11, ""name"": ""IOT BOX"", ""type"": ""IOT BOX"", ""ip"": ""10.121.15.75"", ""loc"": ""UB-MC-PV-1-3"", ""owner"": ""IT"", ""sn"": """", ""start"": ""2026-10-01"", ""remark"": """"}, {""no"": 12, ""name"": ""IOT BOX"", ""type"": ""IOT BOX"", ""ip"": ""10.121.15.51"", ""loc"": ""UB-MC-PV-1-4"", ""owner"": ""IT"", ""sn"": """", ""start"": ""2026-10-01"", ""remark"": """"}, {""no"": 13, ""name"": ""IOT BOX"", ""type"": ""IOT BOX"", ""ip"": ""10.121.15.237"", ""loc"": ""UB-MC-PV-1-5"", ""owner"": ""IT"", ""sn"": """", ""start"": ""2026-10-01"", ""remark"": """"}, {""no"": 14, ""name"": ""IOT BOX"", ""type"": ""IOT BOX"", ""ip"": ""10.121.15.72"", ""loc"": ""UB-MC-PV-1-6"", ""owner"": ""IT"", ""sn"": """", ""start"": ""2026-10-01"", ""remark"": """"}, {""no"": 15, ""name"": ""IOT BOX"", ""type"": ""IOT BOX"", ""ip"": ""10.121.15.36"", ""loc"": ""UB-MC-PV-1-7"", ""owner"": ""IT"", ""sn"": """", ""start"": ""2026-10-01"", ""remark"": """"}, {""no"": 16, ""name"": ""IOT BOX"", ""type"": ""IOT BOX"", ""ip"": ""10.121.15.158"", ""loc"": ""UB-MC-PV-1-8"", ""owner"": ""IT"", ""sn"": """", ""start"": ""2026-10-01"", ""remark"": """"}, {""no"": 17, ""name"": ""IOT BOX"", ""type"": ""IOT BOX"", ""ip"": ""10.121.15.154"", ""loc"": ""UB-MC-PV-2-1"", ""owner"": ""IT"", ""sn"": """", ""start"": ""2026-10-01"", ""remark"": """"}, {""no"": 18, ""name"": ""IOT BOX"", ""type"": ""IOT BOX"", ""ip"": ""10.121.15.91"", ""loc"": ""UB-MC-PV-2-2"", ""owner"": ""IT"", ""sn"": """", ""start"": ""2026-10-01"", ""remark"": """"}, {""no"": 19, ""name"": ""IOT BOX"", ""type"": ""IOT BOX"", ""ip"": ""10.121.15.174"", ""loc"": ""UB-MC-PV-2-3"", ""owner"": ""IT"", ""sn"": """", ""start"": ""2026-10-01"", ""remark"": """"}, {""no"": 20, ""name"": ""IOT BOX"", ""type"": ""IOT BOX"", ""ip"": ""10.121.15.3"", ""loc"": ""UB-MC-PV-2-4"", ""owner"": ""IT"", ""sn"": """", ""start"": ""2026-10-01"", ""remark"": """"}, {""no"": 21, ""name"": ""IOT BOX"", ""type"": ""IOT BOX"", ""ip"": ""10.121.15.1"", ""loc"": ""UB-MC-PV-2-5"", ""owner"": ""IT"", ""sn"": """", ""start"": ""2026-10-01"", ""remark"": """"}, {""no"": 22, ""name"": ""IOT BOX"", ""type"": ""IOT BOX"", ""ip"": ""10.121.15.13"", ""loc"": ""UB-MC-PV-2-6"", ""owner"": ""IT"", ""sn"": """", ""start"": ""2026-10-01"", ""remark"": """"}, {""no"": 23, ""name"": ""IOT BOX"", ""type"": ""IOT BOX"", ""ip"": ""10.121.15.184"", ""loc"": ""UB-MC-PV-2-7"", ""owner"": ""IT"", ""sn"": """", ""start"": ""2026-10-01"", ""remark"": """"}, {""no"": 24, ""name"": ""IOT BOX"", ""type"": ""IOT BOX"", ""ip"": ""10.121.15.190"", ""loc"": ""UB-MC-PV-2-8"", ""owner"": ""IT"", ""sn"": """", ""start"": ""2026-10-01"", ""remark"": """"}, {""no"": 25, ""name"": ""IOT BOX"", ""type"": ""IOT BOX"", ""ip"": ""10.121.15.77"", ""loc"": ""UB-MC-SF-001"", ""owner"": ""IT"", ""sn"": """", ""start"": ""2026-10-01"", ""remark"": """"}, {""no"": 26, ""name"": ""IOT BOX"", ""type"": ""IOT BOX"", ""ip"": ""10.121.15.224"", ""loc"": ""UB-MC-SF-003"", ""owner"": ""IT"", ""sn"": """", ""start"": ""2026-10-01"", ""remark"": """"}, {""no"": 27, ""name"": ""IOT BOX"", ""type"": ""IOT BOX"", ""ip"": ""10.121.15.243"", ""loc"": ""UB-MC-SF-004"", ""owner"": ""IT"", ""sn"": """", ""start"": ""2026-10-01"", ""remark"": """"}]";   // ข้อมูลตั้งต้นจากไฟล์ List Hardware.xlsx (2026-10-23) · ใช้ครั้งแรกตอนตารางว่างเท่านั้น
+
+        static void EnsureHwTable(DbConnection c)
+        {
+            if (_hwTable) return;
+            Cmd(c, null, @"CREATE TABLE IF NOT EXISTS it_hardware (
+                              id          INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                              item_no     INT          NULL COMMENT 'ลำดับ (No.)',
+                              name        VARCHAR(80)  NOT NULL,
+                              hw_type     VARCHAR(40)  NULL,
+                              ip          VARCHAR(45)  NULL,
+                              location    VARCHAR(80)  NULL,
+                              owner       VARCHAR(40)  NULL,
+                              serial_no   VARCHAR(60)  NULL,
+                              start_date  DATE         NULL,
+                              remark      VARCHAR(300) NULL,
+                              updated_at  DATETIME     NULL,
+                              updated_ip  VARCHAR(45)  NULL,
+                              PRIMARY KEY (id),
+                              KEY ix_ip (ip),
+                              KEY ix_type (hw_type)
+                           ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4").ExecuteNonQuery();
+            if (Convert.ToInt32(Cmd(c, null, "SELECT COUNT(*) FROM it_hardware").ExecuteScalar(), CultureInfo.InvariantCulture) == 0)
+            {
+                var js = new System.Web.Script.Serialization.JavaScriptSerializer();
+                foreach (var r in js.Deserialize<List<Dictionary<string, object>>>(HW_SEED))
+                {
+                    DateTime dt; object sd = DateTime.TryParseExact(Convert.ToString(r["start"]), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out dt) ? (object)dt : null;
+                    Cmd(c, null, @"INSERT INTO it_hardware (item_no, name, hw_type, ip, location, owner, serial_no, start_date, remark, updated_at)
+                                   VALUES (@no, @n, @t, @ip, @l, @o, @s, @d, @r, NOW())",
+                        "@no", r["no"], "@n", Convert.ToString(r["name"]), "@t", NullIfEmpty(Convert.ToString(r["type"])), "@ip", NullIfEmpty(Convert.ToString(r["ip"])),
+                        "@l", NullIfEmpty(Convert.ToString(r["loc"])), "@o", NullIfEmpty(Convert.ToString(r["owner"])), "@s", NullIfEmpty(Convert.ToString(r["sn"])),
+                        "@d", sd, "@r", NullIfEmpty(Convert.ToString(r["remark"]))).ExecuteNonQuery();
+                }
+            }
+            _hwTable = true;
+        }
+
+        static Dictionary<string, object> HwRow(DbDataReader r)
+        {
+            var d = new Dictionary<string, object>();
+            d["id"] = Convert.ToInt32(r["id"], CultureInfo.InvariantCulture);
+            foreach (string f in HW_FIELDS)
+            {
+                object v = r[f];
+                d[f] = v == DBNull.Value ? "" : f == "start_date" ? Convert.ToDateTime(v, CultureInfo.InvariantCulture).ToString("yyyy-MM-dd") : Convert.ToString(v, CultureInfo.InvariantCulture);
+            }
+            d["updated_at"] = r["updated_at"] == DBNull.Value ? "" : Convert.ToDateTime(r["updated_at"], CultureInfo.InvariantCulture).ToString("yyyy-MM-dd HH:mm");
+            return d;
+        }
+
+        /// <summary>รายการอุปกรณ์ทั้งหมด เรียงตามลำดับ (No.)</summary>
+        public static List<Dictionary<string, object>> HwList()
+        {
+            if (!Init()) throw new Exception(LastError ?? "DB ยังไม่ได้ตั้งค่า");
+            var list = new List<Dictionary<string, object>>();
+            using (DbConnection c = Open())
+            {
+                EnsureHwTable(c);
+                using (DbDataReader r = Cmd(c, null, "SELECT * FROM it_hardware ORDER BY item_no IS NULL, item_no, id").ExecuteReader())
+                    while (r.Read()) list.Add(HwRow(r));
+            }
+            return list;
+        }
+
+        /// <summary>บันทึก (id = 0 → เพิ่มใหม่) · คืน id</summary>
+        public static int HwSave(int id, Dictionary<string, string> v, string ip)
+        {
+            if (!Init()) throw new Exception(LastError ?? "DB ยังไม่ได้ตั้งค่า");
+            string name; if (!v.TryGetValue("name", out name) || string.IsNullOrWhiteSpace(name)) throw new Exception("ต้องใส่ Name");
+            var args = new List<object>();
+            foreach (string f in HW_FIELDS)
+            {
+                string s; v.TryGetValue(f, out s); s = (s ?? "").Trim();
+                object val = s.Length == 0 ? null : (object)s;
+                if (f == "start_date" && val != null)
+                {
+                    DateTime dt;
+                    if (!DateTime.TryParseExact(s, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out dt)) throw new Exception("Start date ต้องเป็น yyyy-MM-dd");
+                    val = dt;
+                }
+                else if (f == "item_no" && val != null)
+                {
+                    int n; if (!int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out n)) throw new Exception("No. ต้องเป็นตัวเลข");
+                    val = n;
+                }
+                int max = f == "remark" ? 300 : f == "name" || f == "location" ? 80 : f == "serial_no" ? 60 : f == "ip" ? 45 : 40;
+                if (val is string && ((string)val).Length > max) val = ((string)val).Substring(0, max);
+                args.Add("@" + f); args.Add(val);
+            }
+            args.Add("@uip"); args.Add(ip); args.Add("@id"); args.Add(id);
+            using (DbConnection c = Open())
+            {
+                EnsureHwTable(c);
+                if (id > 0)
+                {
+                    var sets = new List<string>(); foreach (string f in HW_FIELDS) sets.Add(f + " = @" + f);
+                    if (Cmd(c, null, "UPDATE it_hardware SET " + string.Join(", ", sets) + ", updated_at = NOW(), updated_ip = @uip WHERE id = @id", args.ToArray()).ExecuteNonQuery() == 0)
+                        throw new Exception("ไม่พบรายการ id " + id);
+                    return id;
+                }
+                var ps = new List<string>(); foreach (string f in HW_FIELDS) ps.Add("@" + f);
+                Cmd(c, null, "INSERT INTO it_hardware (" + string.Join(", ", HW_FIELDS) + ", updated_at, updated_ip) VALUES (" + string.Join(", ", ps) + ", NOW(), @uip)", args.ToArray()).ExecuteNonQuery();
+                return Convert.ToInt32(Cmd(c, null, "SELECT LAST_INSERT_ID()").ExecuteScalar(), CultureInfo.InvariantCulture);
+            }
+        }
+
+        public static void HwDelete(int id)
+        {
+            if (!Init()) throw new Exception(LastError ?? "DB ยังไม่ได้ตั้งค่า");
+            using (DbConnection c = Open())
+            {
+                EnsureHwTable(c);
+                Cmd(c, null, "DELETE FROM it_hardware WHERE id = @id", "@id", id).ExecuteNonQuery();
+            }
         }
 
         // ------------------------------------------------------------ Master Sample (หน้า MasterSample.aspx)
@@ -1191,6 +1493,18 @@ namespace Dashbord
                             { "reason", rd.IsDBNull(8) ? null : rd.GetString(8) } });
                     }
                 }
+                // ยอดรายชั่วโมง (Shot) ของวันผลิตนี้ จาก mc_hourly -> แสดงเหนือ Timeline (index 0 = 08:00)
+                var hours = new long[24];
+                using (DbConnection c2 = Open())
+                using (DbDataReader rh = Cmd(c2, null, "SELECT hour_start, shots FROM mc_hourly WHERE machine_code = @m AND prod_day = @pd",
+                                             "@m", machine, "@pd", dayStart.Date).ExecuteReader())
+                    while (rh.Read())
+                    {
+                        int h = (int)Math.Floor((Convert.ToDateTime(rh.GetValue(0)) - dayStart).TotalHours);
+                        if (h >= 0 && h < 24) hours[h] = rh.IsDBNull(1) ? 0 : Convert.ToInt64(rh.GetValue(1));
+                    }
+                res["hours"] = hours;
+
                 // รายการที่ยังรอบันทึก (ไม่เกิน 1 นาที) -> ต่อท้ายให้เห็นทันที
                 lock (EvSync)
                     foreach (StatusEvent e in _events)
@@ -1254,6 +1568,7 @@ namespace Dashbord
         // ------------------------------------------------------------ น้ำหนักจากเครื่องชั่ง (หน้า WeightLog.aspx)
         //   ตาราง weight_log : 1 แถว = ชั่ง 1 ครั้ง (Node-RED ส่งมาเฉพาะตอนน้ำหนัก > 0 และนิ่งแล้ว)
         static bool _weightTable;
+        public const string NOT_SCANNED = "Not ScanBarcode";   // ชื่อรุ่นเมื่อบาร์โค้ดไม่ตรงรุ่นใด / ยังไม่ยิง (เดิม "Default")
         static readonly Dictionary<string, KeyValuePair<DateTime, double>> _lastWeight = new Dictionary<string, KeyValuePair<DateTime, double>>(StringComparer.OrdinalIgnoreCase);
 
         static void EnsureWeightTable(DbConnection c)
@@ -1284,6 +1599,13 @@ namespace Dashbord
             string[,] add = { { "model", "VARCHAR(40) NULL" }, { "spec_min", "DECIMAL(10,3) NULL" }, { "spec_max", "DECIMAL(10,3) NULL" }, { "result", "VARCHAR(4) NULL" }, { "barcode", "VARCHAR(20) NULL" } };
             for (int i = 0; i < add.GetLength(0); i++)
                 if (!have.Contains(add[i, 0])) Cmd(c, null, "ALTER TABLE weight_log ADD COLUMN " + add[i, 0] + " " + add[i, 1]).ExecuteNonQuery();
+            // 2026-10-23 : เปลี่ยนชื่อรุ่น "Default" (ไม่ตรงรุ่นใด) เป็น "Not ScanBarcode" ในข้อมูลย้อนหลัง · รันซ้ำได้ (ไม่มีแถวให้แก้ก็ไม่ทำอะไร)
+            try
+            {
+                Cmd(c, null, "UPDATE weight_log SET model = @n WHERE model = 'Default'", "@n", NOT_SCANNED).ExecuteNonQuery();
+                Cmd(c, null, "UPDATE weight_log SET raw_text = LEFT(CONCAT(@n, SUBSTRING(raw_text, 8)), 80) WHERE raw_text LIKE 'Default |%'", "@n", NOT_SCANNED).ExecuteNonQuery();
+            }
+            catch { }   // แก้ไม่สำเร็จไม่ให้กระทบการบันทึกน้ำหนัก
             _weightTable = true;
         }
 

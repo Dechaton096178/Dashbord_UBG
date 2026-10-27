@@ -131,6 +131,13 @@
     <Content Include="NG_Top5.aspx" />
     <Content Include="WeightLog.aspx" />
     <Content Include="WaterTank.aspx" />
+    <Content Include="Hardware.aspx" />
+    <Content Include="HourlySummary.aspx" />
+    <Content Include="EmailList.aspx" />
+    <Content Include="InjectionLayout.aspx" />
+    <Content Include="files\Hardware.css" />
+    <Content Include="files\Hardware.js" />
+    <Content Include="files\Hardware_Template.xlsx" />
     <Content Include="files\MasterSample_Template.xlsx" />
     <Content Include="Web.config" />
   </ItemGroup>
@@ -232,6 +239,34 @@
       <DependentUpon>NG_Top5.aspx</DependentUpon>
     </Compile>
     <Compile Include="MasterSampleSeed.cs" />
+    <Compile Include="InjectionLayout.aspx.cs">
+      <DependentUpon>InjectionLayout.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="InjectionLayout.aspx.designer.cs">
+      <DependentUpon>InjectionLayout.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="EmailList.aspx.cs">
+      <DependentUpon>EmailList.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="EmailList.aspx.designer.cs">
+      <DependentUpon>EmailList.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="HourlySummary.aspx.cs">
+      <DependentUpon>HourlySummary.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="HourlySummary.aspx.designer.cs">
+      <DependentUpon>HourlySummary.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="Hardware.aspx.cs">
+      <DependentUpon>Hardware.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Hardware.aspx.designer.cs">
+      <DependentUpon>Hardware.aspx</DependentUpon>
+    </Compile>
     <Compile Include="WaterTank.aspx.cs">
       <DependentUpon>WaterTank.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>
