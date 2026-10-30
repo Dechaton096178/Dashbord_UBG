@@ -9,7 +9,7 @@ using System.Web.UI;
 namespace Dashbord
 {
     // =====================================================================
-    // Hourly Summary by Process — ยอดผลิตรายชั่วโมง (08:00–07:00) แยกตาม Process และรายเครื่อง
+    // Hourly Summary by Process — ยอดผลิตรายชั่วโมง (07:45–07:44, 25 ช่อง) แยกตาม Process และรายเครื่อง
     //   GET ?format=json&day=yyyy-MM-dd
     //   ยอด = Shot × Cavity (ชิ้น) · วันนี้ใช้ค่าสดจากเครื่อง (ชุดเดียวกับ MC Monitor) · วันก่อนใช้ mc_hourly
     // =====================================================================
@@ -28,7 +28,7 @@ namespace Dashbord
             {
                 DateTime now = DateTime.Now, todayStart = CounterStore.ProdDayStart(now), day;
                 DateTime dayStart = DateTime.TryParseExact(Request.QueryString["day"] ?? "", "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out day)
-                    ? day.Date.AddHours(CounterStore.DAY_START_HOUR) : todayStart;
+                    ? day.Date + CounterStore.DAY_START : todayStart;
                 bool today = dayStart == todayStart;
 
                 string err;
@@ -50,10 +50,10 @@ namespace Dashbord
                         if (cav > 0) x.Cav = cav;
                         // ชั่วโมงที่ผ่านไปแล้ว (ก่อนชั่วโมงที่แล้ว) ใช้ค่าใน DB เป็นหลัก -> แก้ยอดใน mc_hourly แล้วเห็นผลทันทีโดยไม่ต้องรีสตาร์ทเว็บ
                         //   ชั่วโมงปัจจุบัน / ชั่วโมงที่แล้ว ใช้ค่าสดจากเครื่อง (DB บันทึกตามทุก 1 นาที)
-                        int curH = (int)Math.Floor((now - dayStart).TotalHours);
+                        int curH = CounterStore.SlotOf(dayStart, now);
                         var hourly = v["hourly"] as List<object>;
                         if (hourly != null)
-                            for (int i = 0; i < 24 && i < hourly.Count; i++)
+                            for (int i = 0; i < CounterStore.SLOTS && i < hourly.Count; i++)
                             {
                                 if (inDb && i < curH - 1) continue;
                                 var hd = hourly[i] as Dictionary<string, object>;
@@ -70,7 +70,7 @@ namespace Dashbord
                 Reply(200, new Dictionary<string, object> {
                     { "ok", err == null }, { "error", err }, { "day", dayStart.ToString("yyyy-MM-dd") }, { "today", today },
                     { "dayStart", dayStart.ToString("yyyy-MM-dd HH:mm:ss") }, { "now", now.ToString("yyyy-MM-dd HH:mm:ss") },
-                    { "curHour", today ? (int)Math.Floor((now - dayStart).TotalHours) : 24 }, { "machines", list } });
+                    { "curHour", today ? CounterStore.SlotOf(dayStart, now) : CounterStore.SLOTS }, { "machines", list } });
             }
             catch (Exception ex) { Reply(500, new { ok = false, error = ex.Message }); }
         }

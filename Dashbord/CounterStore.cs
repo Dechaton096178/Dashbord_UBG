@@ -45,9 +45,9 @@ namespace Dashbord
         }
 
         public string ProdDay;
-        public DateTime CountStart;    // เวลาเริ่มนับยอดของวันนี้ (รับข้อมูลครั้งแรก / ขึ้นวันใหม่ 08:00)
+        public DateTime CountStart;    // เวลาเริ่มนับยอดของวันนี้ (รับข้อมูลครั้งแรก / ขึ้นวันใหม่ 07:45)
         public long ShotsToday;
-        public long[] Hourly = new long[24];
+        public long[] Hourly = new long[CounterStore.SLOTS];
         public double OperatingSec, LossSec, OfflineSec;
         public long? LastShot;
         public long OkToday, NgToday;  // ยอด OK / NG รวมทั้งวัน (นับจากผลต่าง ไม่สนใจหน้างานรีเซ็ต)
@@ -57,7 +57,7 @@ namespace Dashbord
         public DateTime? LastOnline;   // เวลาล่าสุดที่ได้ข้อมูลจริง (online:true)
 
         // สำหรับบันทึกลงฐานข้อมูล
-        public double[] HourOp = new double[24], HourLoss = new double[24], HourOff = new double[24];
+        public double[] HourOp = new double[CounterStore.SLOTS], HourLoss = new double[CounterStore.SLOTS], HourOff = new double[CounterStore.SLOTS];
         public string LastCat;         // run / idle / down / off (ใช้บันทึก mc_status_log)
     }
 
@@ -69,7 +69,34 @@ namespace Dashbord
     public static class CounterStore
     {
         public const string API_KEY = "";          // ถ้าใส่ค่า ผู้ส่งต้องแนบ header X-Api-Key ให้ตรง
-        public const int DAY_START_HOUR = 8;       // วันผลิตเริ่ม 08:00
+        // ---- เวลาเริ่มวันผลิต · แก้ที่นี่ที่เดียว (หน้าเว็บอ่านค่านี้ผ่าน JsDayStart) ----
+        //   07:45 -> 07:45 วันถัดไป (2026-10-27 เปลี่ยนจาก 08:00)
+        //   ช่องรายชั่วโมง : 07:45–07:59 | 08:00–08:59 | 09:00–09:59 | ... | 06:00–06:59 | 07:00–07:44  (25 ช่อง)
+        public const int DAY_START_HOUR = 7;
+        public const int DAY_START_MIN = 45;
+        public static readonly TimeSpan DAY_START = new TimeSpan(DAY_START_HOUR, DAY_START_MIN, 0);
+        public const int SLOTS = DAY_START_MIN > 0 ? 25 : 24;   // จำนวนช่องรายชั่วโมงต่อวัน
+
+        /// <summary>ช่องรายชั่วโมงของเวลา t (0 = ช่องแรกของวัน) · นอกวัน = -1</summary>
+        public static int SlotOf(DateTime dayStart, DateTime t)
+        {
+            double min = (t - dayStart).TotalMinutes;
+            if (min < 0 || min >= 1440) return -1;
+            int first = DAY_START_MIN > 0 ? 60 - DAY_START_MIN : 0;   // ช่องแรกสั้น (07:45–07:59 = 15 นาที)
+            if (first > 0 && min < first) return 0;
+            int i = (int)Math.Floor((min - first) / 60.0) + (first > 0 ? 1 : 0);
+            return i < SLOTS ? i : -1;
+        }
+        /// <summary>เวลาเริ่มของช่อง i (ช่อง 0 = เวลาเริ่มวัน · ช่องอื่น = ต้นชั่วโมง)</summary>
+        public static DateTime SlotStart(DateTime dayStart, int i)
+        {
+            if (i <= 0) return dayStart;
+            return dayStart.Date.AddHours(dayStart.Hour + i);   // เริ่ม 07:45 -> ช่อง 1 = 08:00 ... ช่อง 24 = 07:00
+        }
+        /// <summary>ป้ายช่อง เช่น 07:45, 08:00 ... 07:00</summary>
+        public static string SlotLabel(DateTime dayStart, int i) { return SlotStart(dayStart, i).ToString("HH:mm"); }
+        /// <summary>ค่าสำหรับ JavaScript ในหน้าเว็บ : var DS_H, DS_M, NSLOT</summary>
+        public static string JsDayStart { get { return "var DS_H = " + DAY_START_HOUR + ", DS_M = " + DAY_START_MIN + ", NSLOT = " + SLOTS + ";"; } }
         public const int MAX_GAP_SEC = 300;        // ช่วงห่างเกิน 5 นาทีไม่นำมาคิดเวลา
 
         // ---- เวลาพัก (ไม่นำมาคิด OEE) · แก้ / เพิ่มช่วงได้ที่นี่ ----
@@ -103,7 +130,7 @@ namespace Dashbord
         // ------------------------------------------------------------ public API
         public static DateTime ProdDayStart(DateTime t)
         {
-            DateTime d = t.Date.AddHours(DAY_START_HOUR);
+            DateTime d = t.Date + DAY_START;
             return t < d ? d.AddDays(-1) : d;
         }
 
@@ -222,7 +249,7 @@ namespace Dashbord
             var rows = new List<OeeDb.Row>();
             DateTime now = DateTime.Now;
             DateTime dayStart = ProdDayStart(now);
-            int hNow = (int)Math.Floor((now - dayStart).TotalHours);
+            int hNow = SlotOf(dayStart, now);
             lock (Sync)
             {
                 foreach (MachineState m in Machines.Values)
@@ -252,10 +279,10 @@ namespace Dashbord
                     r.Quality = Q.HasValue ? QPctUtil.Down(Q.Value) : (double?)null;
                     r.Oee = O.HasValue ? Math.Round(O.Value, 2) : (double?)null;
                     r.OkToday = m.OkToday; r.NgToday = m.NgToday; r.StdCt = m.StdCt;
-                    for (int h = Math.Max(0, hNow - 1); h <= Math.Min(23, hNow); h++)
+                    for (int h = Math.Max(0, hNow - 1); h <= Math.Min(SLOTS - 1, hNow); h++)
                         r.Hours.Add(new OeeDb.HourRow
                         {
-                            HourStart = dayStart.AddHours(h),
+                            HourStart = SlotStart(dayStart, h),
                             Shots = m.Hourly[h],
                             Op = m.HourOp[h],
                             Loss = m.HourLoss[h],
@@ -317,8 +344,8 @@ namespace Dashbord
             m.CountStart = now;
             m.ShotsToday = 0;
             m.OkToday = m.NgToday = 0;
-            m.Hourly = new long[24];
-            m.HourOp = new double[24]; m.HourLoss = new double[24]; m.HourOff = new double[24];
+            m.Hourly = new long[SLOTS];
+            m.HourOp = new double[SLOTS]; m.HourLoss = new double[SLOTS]; m.HourOff = new double[SLOTS];
             m.OperatingSec = m.LossSec = m.OfflineSec = 0;
         }
 
@@ -347,8 +374,8 @@ namespace Dashbord
                 double gap = (now - m.LastUpdate).TotalSeconds;
                 if (gap > 0 && gap <= MAX_GAP_SEC)
                 {
-                    int hg = (int)Math.Floor((now - dayStart).TotalHours);
-                    bool sameDay = m.ProdDay == dayKey && hg >= 0 && hg < 24;
+                    int hg = SlotOf(dayStart, now);
+                    bool sameDay = m.ProdDay == dayKey && hg >= 0;
                     // เวลาพัก (BREAKS) : เครื่องหยุด / Offline ช่วงพักไม่นับเป็นเวลาสูญเสีย (ไม่นำมาคิด OEE) · ถ้าเครื่องเดินช่วงพักยังนับเป็นเวลาเดิน
                     double brk = m.LastMode == "operating" ? 0 : BreakOverlapSec(m.LastUpdate, now);
                     double cnt = Math.Max(0, gap - brk);
@@ -412,8 +439,8 @@ namespace Dashbord
                     if (delta > 0)
                     {
                         m.ShotsToday += delta;
-                        int h = (int)Math.Floor((now - dayStart).TotalHours);
-                        if (h >= 0 && h < 24) m.Hourly[h] += delta;
+                        int h = SlotOf(dayStart, now);
+                        if (h >= 0) m.Hourly[h] += delta;
                     }
                 }
                 m.LastShot = m.ShotCount;   // ครั้งแรก = ตั้งฐาน
@@ -463,9 +490,9 @@ namespace Dashbord
 
             var hourly = new List<object>();
             DateTime ds = ProdDayStart(now);
-            for (int i = 0; i < 24; i++)
+            for (int i = 0; i < SLOTS; i++)
                 hourly.Add(new Dictionary<string, object> {
-                    { "hour", ds.AddHours(i).ToString("HH:00") }, { "shots", m.Hourly[i] } });
+                    { "hour", SlotLabel(ds, i) }, { "shots", m.Hourly[i] } });
 
             var v = new Dictionary<string, object>();
             v["machine"] = m.Machine;
@@ -531,7 +558,7 @@ namespace Dashbord
     /// ใช้ไลบรารี MySqlConnector (NuGet) ถ้ายังไม่ได้ติดตั้ง/ยังไม่ตั้งค่า ระบบหน้าจอยังทำงานปกติ แค่ไม่บันทึก
     /// เขียนทุก 1 นาทีแบบ background ไม่ทำให้หน้าเว็บช้า ถ้า DB ล่มจะลองใหม่รอบถัดไป
     /// </summary>
-    public static class OeeDb
+    public static partial class OeeDb
     {
         public const string CONN_NAME = "OEEConnectionString";
         public const int FLUSH_SEC = 60;
@@ -653,9 +680,9 @@ namespace Dashbord
         }
 
         // ------------------------------------------------------------ ยอดรายชั่วโมงทุกเครื่องของวันผลิต (หน้า HourlySummary.aspx)
-        public class HourMc { public string Machine, Process, MachineNo; public int Cav; public long[] Shots = new long[24]; }
+        public class HourMc { public string Machine, Process, MachineNo; public int Cav; public long[] Shots = new long[CounterStore.SLOTS]; }
 
-        /// <summary>Shot รายชั่วโมงของทุกเครื่องในวันผลิต (index 0 = 08:00) จาก mc_hourly · Cavity = pieces/shots ของวันนั้น (ไม่มี -> ตาราง machine)</summary>
+        /// <summary>Shot รายชั่วโมงของทุกเครื่องในวันผลิต (index = ช่องของ CounterStore.SlotOf · 0 = 07:45) จาก mc_hourly · Cavity = pieces/shots ของวันนั้น (ไม่มี -> ตาราง machine)</summary>
         public static List<HourMc> HourlyAll(DateTime dayStart, out string error)
         {
             error = null;
@@ -684,8 +711,8 @@ namespace Dashbord
                             x.Cav = st > 0 && pc > 0 ? Math.Max(1, (int)Math.Round((double)pc / st)) : cavDb;
                             map[mc] = x;
                         }
-                        int h = (int)Math.Floor((Convert.ToDateTime(rd.GetValue(1)) - dayStart).TotalHours);
-                        if (h >= 0 && h < 24) x.Shots[h] = rd.IsDBNull(2) ? 0 : Convert.ToInt64(rd.GetValue(2));
+                        int h = CounterStore.SlotOf(dayStart, Convert.ToDateTime(rd.GetValue(1)));
+                        if (h >= 0) x.Shots[h] += rd.IsDBNull(2) ? 0 : Convert.ToInt64(rd.GetValue(2));
                     }
             }
             catch (Exception ex) { error = ex.Message; }
@@ -1493,15 +1520,15 @@ namespace Dashbord
                             { "reason", rd.IsDBNull(8) ? null : rd.GetString(8) } });
                     }
                 }
-                // ยอดรายชั่วโมง (Shot) ของวันผลิตนี้ จาก mc_hourly -> แสดงเหนือ Timeline (index 0 = 08:00)
-                var hours = new long[24];
+                // ยอดรายชั่วโมง (Shot) ของวันผลิตนี้ จาก mc_hourly -> แสดงเหนือ Timeline (index = ช่อง SlotOf · 0 = 07:45)
+                var hours = new long[CounterStore.SLOTS];
                 using (DbConnection c2 = Open())
                 using (DbDataReader rh = Cmd(c2, null, "SELECT hour_start, shots FROM mc_hourly WHERE machine_code = @m AND prod_day = @pd",
                                              "@m", machine, "@pd", dayStart.Date).ExecuteReader())
                     while (rh.Read())
                     {
-                        int h = (int)Math.Floor((Convert.ToDateTime(rh.GetValue(0)) - dayStart).TotalHours);
-                        if (h >= 0 && h < 24) hours[h] = rh.IsDBNull(1) ? 0 : Convert.ToInt64(rh.GetValue(1));
+                        int h = CounterStore.SlotOf(dayStart, Convert.ToDateTime(rh.GetValue(0)));
+                        if (h >= 0) hours[h] += rh.IsDBNull(1) ? 0 : Convert.ToInt64(rh.GetValue(1));
                     }
                 res["hours"] = hours;
 
@@ -1855,8 +1882,8 @@ namespace Dashbord
                         {
                             MachineState m;
                             if (!machines.TryGetValue(rd.GetString(0), out m)) continue;
-                            int h = (int)Math.Floor((Convert.ToDateTime(rd.GetValue(1)) - dayStart).TotalHours);
-                            if (h < 0 || h > 23) continue;
+                            int h = CounterStore.SlotOf(dayStart, Convert.ToDateTime(rd.GetValue(1)));
+                            if (h < 0) continue;
                             m.Hourly[h] = Convert.ToInt64(rd.GetValue(2));
                             m.HourOp[h] = Convert.ToDouble(rd.GetValue(3));
                             m.HourLoss[h] = Convert.ToDouble(rd.GetValue(4));
@@ -2059,7 +2086,7 @@ namespace Dashbord
                 {
                     cmd.CommandTimeout = 60;
                     cmd.CommandText = @"
-                        SELECT CAST(DATEADD(HOUR, -@H, A.OUTTIME) AS DATE) AS PDay, COUNT(DISTINCT A.ID) AS Batches,
+                        SELECT CAST(DATEADD(MINUTE, -@M, A.OUTTIME) AS DATE) AS PDay, COUNT(DISTINCT A.ID) AS Batches,
                                SUM(ISNULL(A.OUTQTY, 0)) AS OutQty,
                                SUM(ISNULL(X.NgQty, 0)) AS NgQty
                           FROM SFT_OP_REALRUN A
@@ -2067,11 +2094,11 @@ namespace Dashbord
                                        WHERE E.ID = A.ID AND E.ERP_OPID = A.ERP_OPID AND E.EXCEPTTYPE = 'defect') X
                          WHERE A.OUTTIME >= @From AND A.OUTTIME < @To
                            AND (LTRIM(RTRIM(A.EQID)) = @Eq OR LTRIM(RTRIM(A.EQID)) LIKE '_.' + @Eq OR LTRIM(RTRIM(A.EQID)) LIKE '__.' + @Eq)
-                         GROUP BY CAST(DATEADD(HOUR, -@H, A.OUTTIME) AS DATE)";
+                         GROUP BY CAST(DATEADD(MINUTE, -@M, A.OUTTIME) AS DATE)";
                     cmd.Parameters.AddWithValue("@From", from);
                     cmd.Parameters.AddWithValue("@To", to);
                     cmd.Parameters.AddWithValue("@Eq", eq);
-                    cmd.Parameters.AddWithValue("@H", CounterStore.DAY_START_HOUR);
+                    cmd.Parameters.AddWithValue("@M", (int)CounterStore.DAY_START.TotalMinutes);
                     c.Open();
                     using (var rd = cmd.ExecuteReader())
                         while (rd.Read())
@@ -2268,8 +2295,8 @@ namespace Dashbord
         public static Dictionary<string, object> Build(DateTime fromDay, DateTime toDay, string process, string machine)
         {
             if (toDay < fromDay) { var t = fromDay; fromDay = toDay; toDay = t; }
-            int hh = CounterStore.DAY_START_HOUR;
-            DateTime from = fromDay.Date.AddHours(hh), to = toDay.Date.AddDays(1).AddHours(hh);
+            TimeSpan hh = CounterStore.DAY_START;
+            DateTime from = fromDay.Date + hh, to = toDay.Date.AddDays(1) + hh;
             string dbErr, erpErr;
             var days = OeeDb.DailyRange(fromDay, toDay, out dbErr);
             var erp = ErpQuality.RangeByMachine(from, to, out erpErr);
@@ -2349,10 +2376,10 @@ namespace Dashbord
         public static Dictionary<string, object> Daily(string machine, DateTime fromDay, DateTime toDay)
         {
             if (toDay < fromDay) { var t = fromDay; fromDay = toDay; toDay = t; }
-            int hh = CounterStore.DAY_START_HOUR;
+            TimeSpan hh = CounterStore.DAY_START;
             string dbErr, erpErr;
             var md = OeeDb.MachineDays(machine, fromDay, toDay, out dbErr);
-            var erp = ErpQuality.DailyForMachine(machine, fromDay.Date.AddHours(hh), toDay.Date.AddDays(1).AddHours(hh), out erpErr);
+            var erp = ErpQuality.DailyForMachine(machine, fromDay.Date + hh, toDay.Date.AddDays(1) + hh, out erpErr);
             var byDay = new Dictionary<DateTime, OeeDb.MachineDay>();
             foreach (var x in md) byDay[x.Day] = x;
 

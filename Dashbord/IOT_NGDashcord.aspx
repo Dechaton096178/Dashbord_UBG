@@ -33,6 +33,17 @@
 
     * { box-sizing:border-box; }
 
+    /* ---------- โหมดทีวี (?tv=1 หรือปุ่ม 📺) : ซ่อนแถบเมนูบน ใช้เต็มจอ · ตัวนับรีเฟรชลอยมุมขวาบน ---------- */
+    body.ng-tv .site-header { display:none !important; }
+    body.ng-tv { overflow:hidden; }
+    body.ng-tv form { margin:0 !important; padding:0 !important; max-width:none !important; }
+    body.ng-tv .grid { height:100vh; min-height:0; }
+    body.ng-tv #rf { position:fixed; top:calc(6px*var(--u)); right:calc(10px*var(--u)); z-index:60; opacity:.85; }
+    .tvbtn { width:100%; font:inherit; font-weight:700; font-size:calc(14px*var(--u)); padding:calc(7px*var(--u)) calc(10px*var(--u)); border-radius:calc(10px*var(--u));
+             border:calc(1px*var(--u)) solid var(--line); background:#f8fafc; color:var(--ink); cursor:pointer; }
+    .tvbtn:hover { border-color:var(--accent); color:var(--accent); }
+    body.ng-tv .tvbtn { background:var(--accent); color:#fff; border-color:var(--accent); }
+
     body {
         margin:0;
         font-family:'Sarabun',Tahoma,sans-serif;
@@ -616,6 +627,12 @@
             </div>
         </div>
 
+        <!-- โหมดทีวี : ซ่อนเมนูบน (จำค่าแยกแต่ละเครื่อง · ลิงก์ตรง ?tv=1 · Esc = ออก) -->
+        <div>
+            <label>TV Mode:</label>
+            <button type="button" class="tvbtn" id="tvBtn" title="ซ่อนแถบเมนูบน ใช้เต็มจอ · กด F11 ที่เบราว์เซอร์เพื่อเต็มจอจริง · Esc = ออก">📺 TV</button>
+        </div>
+
     </div>
 
 
@@ -1171,6 +1188,42 @@
     }, 1000);
 
     showCountdown();
+
+
+    // =========================================================
+    // โหมดทีวี : ?tv=1 / ?tv=0 ในลิงก์ หรือปุ่ม 📺 (จำไว้ในเบราว์เซอร์ ใช้ต่อหลังรีเฟรชทุก 60 วิ)
+    //   เต็มจอจริงให้กด F11 ที่เบราว์เซอร์ (หน้า postback ทุก 60 วิ ปุ่ม Fullscreen ของหน้าเว็บจะหลุดทุกครั้ง)
+    // =========================================================
+    (function () {
+        function ls(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
+        var m = /[?&]tv=([01])/.exec(location.search);
+        if (m) ls('ng.tv', m[1]);
+        var tvOn = ls('ng.tv') === '1', rf = document.getElementById('rf'), rfHome = rf ? rf.parentNode : null;
+        function applyTv() {
+            document.body.classList.toggle('ng-tv', tvOn);
+            document.getElementById('tvBtn').textContent = tvOn ? '✕ Exit TV' : '📺 TV';
+            if (rf) { if (tvOn) document.body.appendChild(rf); else if (rfHome && rf.parentNode !== rfHome) rfHome.appendChild(rf); }
+            if (window.ngRebuildCharts) setTimeout(window.ngRebuildCharts, 50);   // กราฟปรับตามพื้นที่ใหม่
+        }
+        document.getElementById('tvBtn').addEventListener('click', function () { tvOn = !tvOn; ls('ng.tv', tvOn ? '1' : '0'); applyTv(); });
+        document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && tvOn) { tvOn = false; ls('ng.tv', '0'); applyTv(); } });
+        applyTv();
+    })();
+
+    // ข้ามวัน : ถ้ากำลังดู "วันนี้" (Start = End = วันที่ตอนโหลดหน้า) แล้วเลยเที่ยงคืน -> รีเฟรชครั้งถัดไปเปลี่ยนเป็นวันใหม่ให้เอง (จอทีวีเปิดค้าง)
+    (function () {
+        function ymd(d) { return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+        var loadDay = ymd(new Date()), f = document.getElementById('<%= txtFrom.ClientID %>'), t = document.getElementById('<%= txtTo.ClientID %>');
+        var orig = refreshNow;
+        refreshNow = function () {
+            var today = ymd(new Date());
+            if (f && t && today !== loadDay && f.value === loadDay && t.value === loadDay) {
+                if (f._flatpickr) f._flatpickr.setDate(today, false); else f.value = today;
+                if (t._flatpickr) t._flatpickr.setDate(today, false); else t.value = today;
+            }
+            orig();
+        };
+    })();
 
 </script>
 </asp:Content>

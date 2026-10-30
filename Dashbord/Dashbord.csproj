@@ -134,15 +134,89 @@
     <Content Include="Hardware.aspx" />
     <Content Include="HourlySummary.aspx" />
     <Content Include="EmailList.aspx" />
+    <Content Include="HrLogin.aspx" />
+    <Content Include="HrEmployee.aspx" />
+    <Content Include="HrUsers.aspx" />
+    <Content Include="TimeAttendance.aspx" />
+    <Content Include="LeaveRequest.aspx" />
+    <Content Include="OtRequest.aspx" />
+    <Content Include="files\LeaveRequest.js" />
+    <Content Include="files\OtRequest.js" />
+    <Content Include="files\HrPrint.js" />
+    <Content Include="files\TimeAttendance.js" />
+    <Content Include="files\Hr.css" />
     <Content Include="InjectionLayout.aspx" />
     <Content Include="files\Hardware.css" />
     <Content Include="files\Hardware.js" />
     <Content Include="files\Hardware_Template.xlsx" />
+    <Content Include="files\Weight_Standard_Barcode.xlsx" />
+    <Content Include="Maintenance.aspx" />
+    <Content Include="files\Maintenance.css" />
+    <Content Include="files\Maintenance.js" />
+    <Content Include="files\qrcode.js" />
     <Content Include="files\MasterSample_Template.xlsx" />
     <Content Include="Web.config" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="AppMenu.cs" />
+    <Compile Include="MaintenanceDb.cs" />
+    <Compile Include="Maintenance.aspx.cs">
+      <DependentUpon>Maintenance.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="Maintenance.aspx.designer.cs">
+      <DependentUpon>Maintenance.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="HrAuth.cs" />
+    <Compile Include="HrDb.cs" />
+    <Compile Include="SheetReader.cs" />
+    <Compile Include="HrTaDb.cs" />
+    <Compile Include="TaCalc.cs" />
+    <Compile Include="HrFlow.cs" />
+    <Compile Include="HrLeaveDb.cs" />
+    <Compile Include="OtCalc.cs" />
+    <Compile Include="LeaveRequest.aspx.cs">
+      <DependentUpon>LeaveRequest.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="LeaveRequest.aspx.designer.cs">
+      <DependentUpon>LeaveRequest.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="OtRequest.aspx.cs">
+      <DependentUpon>OtRequest.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="OtRequest.aspx.designer.cs">
+      <DependentUpon>OtRequest.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="TimeAttendance.aspx.cs">
+      <DependentUpon>TimeAttendance.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="TimeAttendance.aspx.designer.cs">
+      <DependentUpon>TimeAttendance.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="HrLogin.aspx.cs">
+      <DependentUpon>HrLogin.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="HrLogin.aspx.designer.cs">
+      <DependentUpon>HrLogin.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="HrEmployee.aspx.cs">
+      <DependentUpon>HrEmployee.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="HrEmployee.aspx.designer.cs">
+      <DependentUpon>HrEmployee.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="HrUsers.aspx.cs">
+      <DependentUpon>HrUsers.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="HrUsers.aspx.designer.cs">
+      <DependentUpon>HrUsers.aspx</DependentUpon>
+    </Compile>
     <Compile Include="connect.aspx.cs">
       <DependentUpon>connect.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>

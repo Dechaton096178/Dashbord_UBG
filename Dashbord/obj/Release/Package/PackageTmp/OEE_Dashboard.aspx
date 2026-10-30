@@ -2,7 +2,7 @@
 
 <%-- =====================================================================
      OEE Dashboard — กระดาน OEE รายวัน (ออกแบบให้อ่านจากจอทีวีได้ : ปุ่ม TV หรือ ?tv=1)
-     A, P จากเครื่อง (IoT) · Q จาก ERP · วันผลิต 08:00–08:00 · ตัวเลขชุดเดียวกับ MC Monitor
+     A, P จากเครื่อง (IoT) · Q จาก ERP · วันผลิต 07:45–07:45 · ตัวเลขชุดเดียวกับ MC Monitor
      ข้อมูล : ?format=hist (สรุป OEE) + ?format=timeline (สถานะเครื่องทั้งวัน) ดู OEE_Dashboard.aspx.cs
      ===================================================================== --%>
 
@@ -175,6 +175,22 @@
 <asp:Content ID="cScript" ContentPlaceHolderID="ScriptContent" runat="server">
 <script>
 // @ts-nocheck
+// ---- เวลาเริ่มวันผลิต (จาก CounterStore.DAY_START บน Server) · ช่องรายชั่วโมง 07:45–07:59 | 08:00–08:59 | ... | 07:00–07:44 ----
+<%= Dashbord.CounterStore.JsDayStart %>
+var DS_TXT = ('0' + DS_H).slice(-2) + ':' + ('0' + DS_M).slice(-2);
+function slotLbl(i) { return i === 0 ? DS_TXT : ('0' + ((DS_H + i) % 24)).slice(-2) + ':00'; }
+function slotOf(t0, t) {                                   // t0, t = ms · ช่องของเวลา t ในวันที่เริ่ม t0 (-1 = นอกวัน)
+    var m = (t - t0) / 60000, f = DS_M ? 60 - DS_M : 0;
+    if (m < 0 || m >= 1440) return -1;
+    if (f && m < f) return 0;
+    var i = Math.floor((m - f) / 60) + (f ? 1 : 0);
+    return i < NSLOT ? i : -1;
+}
+function curSlot(t0, t) { return t >= t0 + 864e5 ? NSLOT - 1 : slotOf(t0, t); }
+function tickLbl(h) { var m = DS_H * 60 + DS_M + h * 60; return ('0' + (Math.floor(m / 60) % 24)).slice(-2) + ':' + ('0' + (m % 60)).slice(-2); }
+function beforeDs(d) { return d.getHours() * 60 + d.getMinutes() < DS_H * 60 + DS_M; }
+function slotMin(i) { return DS_M && i === 0 ? 60 - DS_M : DS_M && i === NSLOT - 1 ? DS_M : 60; }   // ความยาวช่อง (นาที)
+function slotHours(n) { var s = 0; for (var i = 0; i < n && i < NSLOT; i++) s += slotMin(i); return s / 60; }   // ชั่วโมงรวมของ n ช่องแรก
 (function () {
     var $ = function (id) { return document.getElementById(id); };
     var PROCS = JSON.parse($('procJson').textContent || '[]');
@@ -192,7 +208,7 @@
     // ชื่อที่แสดง = EQID (ตัดเลขนำหน้า "1.UB-MC-PV-1-2" → "UB-MC-PV-1-2") · ไม่มี EQID ใช้รหัสเครื่อง
     function mname(m) { var e = String((m && m.eqid) || '').replace(/^\s*\d+\s*[.\-:]\s*/, '').trim(); return e || (m && m.machine) || ''; }
     function dayStr(d) { return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
-    function prodDay() { var d = new Date(); if (d.getHours() < 8) d.setDate(d.getDate() - 1); return dayStr(d); }
+    function prodDay() { var d = new Date(); if (beforeDs(d)) d.setDate(d.getDate() - 1); return dayStr(d); }
     function addDays(s, n) { var d = new Date(s + 'T00:00:00'); d.setDate(d.getDate() + n); return dayStr(d); }
     function tms(s) { return new Date(String(s).replace(' ', 'T')).getTime(); }
     function hm(s) { return String(s || '').slice(11, 16); }
@@ -266,8 +282,8 @@
     }
 
     // ---------- คำนวณสถานะ / ช่วงเวลา ----------
-    function win() {   // ช่วงที่แสดงบน Timeline : วันนี้ = 08:00 → ตอนนี้ (+30 นาที) · วันก่อน = 08:00 → 08:00
-        var t0 = tms(curDay() + ' 08:00:00'), full = t0 + 24 * 3600e3;
+    function win() {   // ช่วงที่แสดงบน Timeline : วันนี้ = 07:45 → ตอนนี้ (+30 นาที) · วันก่อน = 07:45 → 07:45
+        var t0 = tms(curDay() + ' ' + DS_TXT + ':00'), full = t0 + 24 * 3600e3;
         if (!isToday()) return { a: t0, b: full, now: null };
         var now = Date.now(), b = Math.min(full, Math.max(t0 + 4 * 3600e3, now + 30 * 60e3));
         b = Math.ceil((b - t0) / 3600e3) * 3600e3 + t0;
@@ -297,7 +313,7 @@
         $('selMc').value = st.mc;
 
         var title = st.mc ? (rows[0] ? mname(rows[0]) : st.mc) : (st.proc === 'All' ? 'All Processes' : st.proc);
-        $('ttl').innerHTML = 'OEE · ' + esc(title) + '<small>' + wd + ' ' + day + ' · production day 08:00 – 08:00' + (isToday() ? ' · live' : '') + '</small>';
+        $('ttl').innerHTML = 'OEE · ' + esc(title) + '<small>' + wd + ' ' + day + ' · production day ' + DS_TXT + ' – ' + DS_TXT + (isToday() ? ' · live' : '') + '</small>';
         $('upd').textContent = 'updated ' + new Date().toTimeString().slice(0, 5) + (isToday() ? (st.tv ? ' · refresh 1 min' : ' · refresh 3 min') : '');
         $('info').innerHTML = '<b>' + rows.length + '</b> machines with data · A, P from machine (IoT) · Q from ERP · same numbers as MC Monitor';
         $('warn').innerHTML = (h.dbError ? '<div class="oh-warn">Machine DB: ' + esc(h.dbError) + '</div>' : '') + (h.erpError ? '<div class="oh-warn">ERP: ' + esc(h.erpError) + ' — Quality assumed 100%</div>' : '');
@@ -326,7 +342,7 @@
         // กระดานเครื่อง
         var W = win(), span = W.b - W.a, hours = Math.round(span / 3600e3), step = hours <= 8 ? 1 : hours <= 16 ? 2 : 4;
         var ticks = []; for (var hh = 0; hh <= hours; hh += step) ticks.push(hh);
-        var ax = '<div class="tlax">' + ticks.map(function (x, i) { return '<span' + (x * 3600e3 >= span ? ' class="last"' : '') + ' style="left:' + (x * 3600e3 * 100 / span) + '%">' + ('0' + ((8 + x) % 24)).slice(-2) + ':00</span>'; }).join('') + '</div>';
+        var ax = '<div class="tlax">' + ticks.map(function (x, i) { return '<span' + (x * 3600e3 >= span ? ' class="last"' : '') + ' style="left:' + (x * 3600e3 * 100 / span) + '%">' + tickLbl(x) + '</span>'; }).join('') + '</div>';
         if (st.mc && !rows.length) rows = [{ machine: st.mc }];
         rows.sort(function (a, b) {
             if (st.sort === 'oee') { var x = a.oee == null ? 999 : a.oee, y = b.oee == null ? 999 : b.oee; return x - y; }
@@ -387,10 +403,10 @@
     window.addEventListener('resize', function () { if (st.hist) render(); });
 
     load();
-    // รีเฟรช : ทีวี 1 นาที · ปกติ 3 นาที (เฉพาะวันนี้) · ทีวีที่ค้างวันเก่า -> กลับมาวันนี้ตอน 08:00
+    // รีเฟรช : ทีวี 1 นาที · ปกติ 3 นาที (เฉพาะวันนี้) · ทีวีที่ค้างวันเก่า -> กลับมาวันนี้ตอนเริ่มวันผลิต (07:45)
     var lastLoad = Date.now();
     setInterval(function () { if (document.hidden || !isToday()) return; if (st.tv || Date.now() - lastLoad > 170000) { lastLoad = Date.now(); load(true); } }, 60000);
-    setInterval(function () { if (st.tv && st.day && st.day !== prodDay() && new Date().getHours() === 8 && new Date().getMinutes() < 2) { st.day = ''; load(true); } }, 60000);
+    setInterval(function () { if (st.tv && st.day && st.day !== prodDay() && new Date().getHours() === DS_H && new Date().getMinutes() >= DS_M && new Date().getMinutes() < DS_M + 2) { st.day = ''; load(true); } }, 60000);
 })();
 </script>
 </asp:Content>

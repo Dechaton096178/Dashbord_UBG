@@ -933,12 +933,22 @@
             return !!document.querySelector('.flatpickr-calendar.open');
         }
 
-        document.getElementById('rf').addEventListener('click', function () { btnSearch.click(); });
+        // ข้ามวันกะ (08:00) : ถ้าช่วงที่ดูจบที่ "วันนี้" ตอนเปิดหน้า -> เลื่อนทั้งช่วงไปตามวันใหม่ก่อนรีเฟรช
+        var loadToday = ymd(shiftToday());
+        function setFp(el, v) { if (el._flatpickr) el._flatpickr.setDate(v, false); else el.value = v; }
+        function rollDay() {
+            var t = ymd(shiftToday());
+            if (t === loadToday || txtTo.value !== loadToday) return;
+            var n = Math.round((new Date(t + 'T00:00:00') - new Date(loadToday + 'T00:00:00')) / 864e5), f = new Date(txtFrom.value + 'T00:00:00');
+            if (!isNaN(f)) { f.setDate(f.getDate() + n); setFp(txtFrom, ymd(f)); }
+            setFp(txtTo, t);
+        }
+        document.getElementById('rf').addEventListener('click', function () { rollDay(); btnSearch.click(); });
 
         setInterval(function () {
             if (isBusy()) { secLeft = REFRESH_SEC; showCountdown(); return; }
             secLeft--;
-            if (secLeft <= 0) { secLeft = 0; showCountdown(); btnSearch.click(); return; }
+            if (secLeft <= 0) { secLeft = 0; showCountdown(); rollDay(); btnSearch.click(); return; }
             showCountdown();
         }, 1000);
 

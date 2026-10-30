@@ -1,0 +1,325 @@
+[
+    {
+        "id": "cm08ping00000001",
+        "type": "tab",
+        "label": "CM-008 ทดสอบ PLC 192.168.3.100:502",
+        "disabled": false,
+        "info": "ping + ip addr + route + เปิด port + อ่าน Modbus HR0 · ใช้ node มาตรฐาน (exec, function)"
+    },
+    {
+        "id": "cm08p00000000001",
+        "type": "comment",
+        "z": "cm08ping00000001",
+        "name": "Deploy แล้วผลขึ้นเอง · กดปุ่มซ้ายเพื่อทดสอบซ้ำ · ดูแท็บ Debug (filter: all nodes)",
+        "info": "",
+        "x": 330,
+        "y": 40,
+        "wires": []
+    },
+    {
+        "id": "cm08p00000000002",
+        "type": "inject",
+        "z": "cm08ping00000001",
+        "name": "ทดสอบ (กด / ทุก 30 วิ)",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "30",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "2",
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 150,
+        "y": 120,
+        "wires": [
+            [
+                "cm08p00000000003",
+                "cm08p00000000005",
+                "cm08p00000000007",
+                "cm08p00000000009",
+                "cm08p00000000011"
+            ]
+        ]
+    },
+    {
+        "id": "cm08p00000000003",
+        "type": "exec",
+        "z": "cm08ping00000001",
+        "command": "ping -c 3 -W 1 192.168.3.100",
+        "addpay": "",
+        "append": "",
+        "useSpawn": "false",
+        "timer": "10",
+        "winHide": false,
+        "oldrc": false,
+        "name": "ping 192.168.3.100",
+        "x": 430,
+        "y": 100,
+        "wires": [
+            [
+                "cm08p00000000004"
+            ],
+            [
+                "cm08p00000000004"
+            ],
+            []
+        ]
+    },
+    {
+        "id": "cm08p00000000004",
+        "type": "debug",
+        "z": "cm08ping00000001",
+        "name": "① ping",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 690,
+        "y": 100,
+        "wires": []
+    },
+    {
+        "id": "cm08p00000000005",
+        "type": "exec",
+        "z": "cm08ping00000001",
+        "command": "ip -4 addr show | grep -E 'inet |^[0-9]'",
+        "addpay": "",
+        "append": "",
+        "useSpawn": "false",
+        "timer": "5",
+        "winHide": false,
+        "oldrc": false,
+        "name": "IP ของกล่อง (ต้องมี 192.168.3.x)",
+        "x": 460,
+        "y": 160,
+        "wires": [
+            [
+                "cm08p00000000006"
+            ],
+            [
+                "cm08p00000000006"
+            ],
+            []
+        ]
+    },
+    {
+        "id": "cm08p00000000006",
+        "type": "debug",
+        "z": "cm08ping00000001",
+        "name": "② IP กล่อง",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 700,
+        "y": 160,
+        "wires": []
+    },
+    {
+        "id": "cm08p00000000007",
+        "type": "exec",
+        "z": "cm08ping00000001",
+        "command": "ip route get 192.168.3.100; ip neigh show 192.168.3.100",
+        "addpay": "",
+        "append": "",
+        "useSpawn": "false",
+        "timer": "5",
+        "winHide": false,
+        "oldrc": false,
+        "name": "เส้นทาง + ARP ไป PLC",
+        "x": 440,
+        "y": 220,
+        "wires": [
+            [
+                "cm08p00000000008"
+            ],
+            [
+                "cm08p00000000008"
+            ],
+            []
+        ]
+    },
+    {
+        "id": "cm08p00000000008",
+        "type": "debug",
+        "z": "cm08ping00000001",
+        "name": "③ route / ARP",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 700,
+        "y": 220,
+        "wires": []
+    },
+    {
+        "id": "cm08p00000000009",
+        "type": "function",
+        "z": "cm08ping00000001",
+        "name": "เปิด port 502 ไหม + อ่าน Modbus",
+        "func": "// @ts-nocheck\n// ===== ทดสอบเชื่อมต่อ PLC UB-MC-CM-008 : TCP port + Modbus อ่าน HR0 (Unit 1 / 0 / 255) =====\nconst HOST = \"192.168.3.100\";\nconst PORTS = [502, 5000, 5001, 5002, 5007, 5100, 1025];\nconst TMO = 3000;\nfunction tcp(port) {\n    return new Promise(res => {\n        const s = new net.Socket(), t0 = Date.now(); let done = false;\n        const fin = (ok, why) => { if (done) return; done = true; try { s.destroy(); } catch (e) {} res({ port, ok, ms: Date.now() - t0, why }); };\n        s.setTimeout(TMO); s.on(\"timeout\", () => fin(false, \"timeout (ไม่มีใครตอบ / firewall / คนละวง)\"));\n        s.on(\"error\", e => fin(false, e.code === \"ECONNREFUSED\" ? \"ECONNREFUSED (มีเครื่องนี้ แต่ port ปิด)\" : e.code === \"EHOSTUNREACH\" ? \"EHOSTUNREACH (หาเส้นทางไม่เจอ: กล่องไม่มี IP วง 192.168.3.x?)\" : e.code || e.message));\n        s.connect(port, HOST, () => fin(true, \"เปิด\"));\n    });\n}\nfunction modbus(unit) {\n    return new Promise(res => {\n        const s = new net.Socket(); let buf = Buffer.alloc(0), done = false;\n        const fin = r => { if (done) return; done = true; try { s.destroy(); } catch (e) {} res(Object.assign({ unit }, r)); };\n        s.setTimeout(TMO); s.on(\"timeout\", () => fin({ ok: false, why: \"ต่อได้แต่ไม่ตอบคำสั่ง Modbus\" }));\n        s.on(\"error\", e => fin({ ok: false, why: e.code || e.message }));\n        s.on(\"close\", () => fin({ ok: false, why: \"PLC ตัดสาย (อาจจำกัด IP ที่ต่อได้ / connection เต็ม)\" }));\n        s.on(\"data\", d => {\n            buf = Buffer.concat([buf, d]);\n            if (buf.length < 9) return;\n            if (buf[7] & 0x80) return fin({ ok: false, why: \"Modbus exception \" + buf[8] + (buf[8] === 2 ? \" (address 0 ไม่มี แต่ Modbus ทำงาน)\" : buf[8] === 11 ? \" (Unit ID ไม่ตรง)\" : \"\") , modbusAlive: true });\n            if (buf.length >= 9 + buf[8]) { const v = []; for (let i = 0; i < buf[8] / 2; i++) v.push(buf.readUInt16BE(9 + i * 2)); fin({ ok: true, why: \"อ่าน HR0–HR9 ได้\", values: v }); }\n        });\n        s.connect(502, HOST, () => s.write(Buffer.from([0, unit + 1, 0, 0, 0, 6, unit, 3, 0, 0, 0, 10])));\n    });\n}\n(async () => {\n    node.status({ fill: \"blue\", shape: \"ring\", text: \"กำลังทดสอบ...\" });\n    const ports = [];\n    for (const p of PORTS) ports.push(await tcp(p));\n    const open = ports.filter(p => p.ok).map(p => p.port);\n    let mb = [];\n    if (open.includes(502)) for (const u of [1, 0, 255]) { const r = await modbus(u); mb.push(r); if (r.ok) break; }\n    const ok = mb.find(r => r.ok);\n    let hint;\n    if (ok) hint = \"✓ Modbus ใช้ได้ (Unit \" + ok.unit + \") → flow สแกน Tag ควรต่อได้ ลอง Deploy flow สแกนใหม่ / กด 'หา PLC ใหม่'\";\n    else if (open.includes(502)) hint = mb.some(r => r.modbusAlive) ? \"Modbus ทำงาน แต่ HR0 อ่านไม่ได้ → ใช้ได้ ให้ flow สแกนหาช่วงเอง\" : \"port 502 เปิด แต่ไม่ตอบ Modbus → เช็คใน GX Works3 ว่าเปิด MODBUS/TCP Slave และ IP ที่อนุญาต\";\n    else if (ports.every(p => /EHOSTUNREACH|timeout/.test(p.why))) hint = \"เข้าไม่ถึงเครื่อง → ดู ping / ip addr ด้านล่าง: กล่องต้องมี IP วง 192.168.3.x ที่ eth0 และสาย LAN ต่อถึง PLC\";\n    else hint = \"เครื่องตอบ แต่ port 502 ปิด → PLC ยังไม่เปิด Modbus TCP / ใช้ port อื่น (ดูรายการ port)\";\n    node.status({ fill: ok ? \"green\" : open.length ? \"yellow\" : \"red\", shape: \"dot\", text: ok ? \"Modbus OK Unit \" + ok.unit : open.length ? \"port เปิด: \" + open.join(\",\") : \"ต่อ \" + HOST + \" ไม่ได้\" });\n    node.send({ topic: \"ทดสอบ \" + HOST, payload: { hint, ports: ports.map(p => p.port + \": \" + p.why + \" (\" + p.ms + \" ms)\"), modbus: mb } });\n})();\nreturn null;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [
+            {
+                "var": "net",
+                "module": "net"
+            }
+        ],
+        "x": 460,
+        "y": 280,
+        "wires": [
+            [
+                "cm08p00000000010"
+            ]
+        ]
+    },
+    {
+        "id": "cm08p00000000010",
+        "type": "debug",
+        "z": "cm08ping00000001",
+        "name": "④ port + Modbus (สรุป)",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 720,
+        "y": 280,
+        "wires": []
+    },
+    {
+        "id": "cm08p00000000011",
+        "type": "exec",
+        "z": "cm08ping00000001",
+        "command": "(command -v nc >/dev/null && nc -zv -w 3 192.168.3.100 502 2>&1) || (timeout 3 bash -c '</dev/tcp/192.168.3.100/502' && echo 'port 502 open') 2>&1 || echo 'port 502 closed / unreachable'",
+        "addpay": "",
+        "append": "",
+        "useSpawn": "false",
+        "timer": "8",
+        "winHide": false,
+        "oldrc": false,
+        "name": "nc port 502 (สำรอง)",
+        "x": 430,
+        "y": 340,
+        "wires": [
+            [
+                "cm08p00000000012"
+            ],
+            [
+                "cm08p00000000012"
+            ],
+            []
+        ]
+    },
+    {
+        "id": "cm08p00000000012",
+        "type": "debug",
+        "z": "cm08ping00000001",
+        "name": "⑤ nc 502",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 690,
+        "y": 340,
+        "wires": []
+    },
+    {
+        "id": "cm08p00000000013",
+        "type": "inject",
+        "z": "cm08ping00000001",
+        "name": "ลองทุกแบบ port 502 + UDP 8001/8002 (กด)",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "8",
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 170,
+        "y": 420,
+        "wires": [
+            [
+                "cm08p00000000014"
+            ]
+        ]
+    },
+    {
+        "id": "cm08p00000000014",
+        "type": "function",
+        "z": "cm08ping00000001",
+        "name": "ลอง Modbus / SLMP (TCP 502 + UDP 8001/8002) + ดู byte ที่ตอบ",
+        "func": "// @ts-nocheck\n// ===== port 502 เปิดแต่ไม่ตอบ Modbus → ลองทุกแบบบน port 502 แล้วดู byte ที่ PLC ตอบกลับ =====\n//   Modbus FC3/FC4/FC1 (Unit 1, 0, 255) · SLMP/MC 3E Binary · 3E ASCII · 4E Binary · รอ banner\nconst HOST = \"192.168.3.100\", PORT = +(msg.port || 502), TMO = 3000;\nfunction hex(b) { return b.slice(0, 40).toString(\"hex\").replace(/(..)/g, \"$1 \").trim(); }\nfunction tryFrame(name, frame) {\n    return new Promise(res => {\n        const s = new net.Socket(); let buf = Buffer.alloc(0), done = false, t0 = Date.now();\n        const fin = why => { if (done) return; done = true; try { s.destroy(); } catch (e) {} res({ name, ok: buf.length > 0, why, bytes: buf.length, hex: buf.length ? hex(buf) : \"\", ascii: buf.length ? buf.toString(\"latin1\").replace(/[^\\x20-\\x7e]/g, \".\").slice(0, 40) : \"\", ms: Date.now() - t0 }); };\n        s.setTimeout(TMO); s.on(\"timeout\", () => fin(buf.length ? \"ตอบแล้ว\" : \"ไม่ตอบใน \" + TMO / 1000 + \" วิ\"));\n        s.on(\"error\", e => fin(e.code || e.message));\n        s.on(\"close\", () => fin(buf.length ? \"ตอบแล้ว PLC ปิดสาย\" : \"PLC ตัดสายทันที (ไม่รับคำสั่งแบบนี้ / IP ไม่ได้รับอนุญาต)\"));\n        s.on(\"data\", d => { buf = Buffer.concat([buf, d]); setTimeout(() => fin(\"ตอบแล้ว\"), 150); });\n        s.connect(PORT, HOST, () => { if (frame) s.write(frame); });\n    });\n}\nfunction tryUdp(name, port, frame) {   // SLMP แบบ UDP (เครื่องนี้ตั้ง SLMP UDP 8001 / 8002)\n    return new Promise(res => {\n        const u = dgram.createSocket(\"udp4\"), t0 = Date.now(); let done = false;\n        const fin = (b, why) => { if (done) return; done = true; try { u.close(); } catch (e) {} res({ name, ok: !!b, why, bytes: b ? b.length : 0, hex: b ? hex(b) : \"\", ascii: \"\", ms: Date.now() - t0 }); };\n        u.on(\"message\", b => fin(b, b.readUInt16LE(0) === 0xD0 && b.readUInt16LE(9) === 0 ? \"ตอบแล้ว · อ่าน D0 ได้ ✓\" : \"ตอบแล้ว (end code 0x\" + (b.length > 10 ? b.readUInt16LE(9).toString(16) : \"?\") + \")\"));\n        u.on(\"error\", e => fin(null, e.code || e.message));\n        setTimeout(() => fin(null, \"ไม่ตอบใน \" + TMO / 1000 + \" วิ (UDP)\"), TMO);\n        u.send(frame, port, HOST);\n    });\n}\nconst mb = (u, fc, a, q) => Buffer.from([0, 1, 0, 0, 0, 6, u, fc, a >> 8, a & 255, q >> 8, q & 255]);\nfunction mc3e() { const b = Buffer.alloc(21); b.writeUInt16LE(0x50, 0); b[3] = 0xFF; b.writeUInt16LE(0x3FF, 4); b.writeUInt16LE(12, 7); b.writeUInt16LE(0x10, 9); b.writeUInt16LE(0x0401, 11); b.writeUIntLE(0, 15, 3); b[18] = 0xA8; b.writeUInt16LE(10, 19); return b; }\nfunction mc4e() { const b = Buffer.alloc(25); b.writeUInt16LE(0x54, 0); b.writeUInt16LE(1, 2); b[7] = 0xFF; b.writeUInt16LE(0x3FF, 8); b.writeUInt16LE(12, 11); b.writeUInt16LE(0x10, 13); b.writeUInt16LE(0x0401, 15); b.writeUIntLE(0, 19, 3); b[22] = 0xA8; b.writeUInt16LE(10, 23); return b; }\nconst TESTS = [\n    [\"รอ banner (ไม่ส่งอะไร)\", null],\n    [\"Modbus FC3 HR0 Unit 1\", mb(1, 3, 0, 10)], [\"Modbus FC3 HR0 Unit 0\", mb(0, 3, 0, 10)], [\"Modbus FC3 HR0 Unit 255\", mb(255, 3, 0, 10)],\n    [\"Modbus FC4 IR0 Unit 1\", mb(1, 4, 0, 10)], [\"Modbus FC1 Coil0 Unit 1\", mb(1, 1, 0, 16)], [\"Modbus FC3 HR0 Unit 2\", mb(2, 3, 0, 10)],\n    [\"SLMP/MC 3E Binary D0\", mc3e()], [\"SLMP/MC 3E ASCII D0\", Buffer.from(\"500000FF03FF000018001004010000D*000000000A\", \"latin1\")], [\"SLMP/MC 4E Binary D0\", mc4e()]\n];\n(async () => {\n    const out = [];\n    for (const [n, f] of TESTS) { node.status({ fill: \"blue\", shape: \"ring\", text: \"ลอง \" + n }); out.push(await tryFrame(n, f)); await new Promise(r => setTimeout(r, 300)); }\n    for (const port of [8001, 8002]) { node.status({ fill: \"blue\", shape: \"ring\", text: \"ลอง SLMP UDP \" + port }); out.push(await tryUdp(\"SLMP 3E Binary UDP \" + port + \" D0\", port, mc3e())); }\n    const hit = out.filter(r => r.ok && r.name !== \"รอ banner (ไม่ส่งอะไร)\");\n    const banner = out[0].ok;\n    let hint = hit.length ? \"✓ ตอบกลับ: \" + hit.map(r => r.name).join(\", \") + \" → ส่งรูปนี้มา จะตั้ง flow สแกนให้ตรงแบบนั้น\"\n        : banner ? \"PLC ส่งข้อความเองตอนต่อ (banner) → ไม่ใช่ Modbus/SLMP อาจเป็นอุปกรณ์อื่น ดู ascii\"\n        : out.filter(r => !/UDP/.test(r.name)).every(r => /ตัดสาย/.test(r.why)) ? \"ตัดสายทุกแบบ → PLC จำกัด IP ที่ต่อได้ (ใส่ IP กล่องใน GX Works3) หรือ connection เต็ม (มีเครื่องอื่นต่อค้างอยู่)\"\n        : \"ต่อได้แต่ไม่ตอบทุกแบบ → port 502 อาจเป็นของอุปกรณ์อื่น (HMI / Gateway) หรือ PLC ยังไม่ได้เขียน parameter MODBUS/TCP ลงเครื่อง (ต้อง Write + Reset PLC)\";\n    node.status({ fill: hit.length ? \"green\" : \"red\", shape: \"dot\", text: hit.length ? \"ตอบ: \" + hit[0].name : \"ไม่ตอบทุกแบบ\" });\n    node.send({ topic: \"ทดสอบทุกแบบ \" + HOST + \":\" + PORT, payload: { hint, tests: out } });\n})();\nreturn null;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [
+            {
+                "var": "net",
+                "module": "net"
+            },
+            {
+                "var": "dgram",
+                "module": "dgram"
+            }
+        ],
+        "x": 480,
+        "y": 420,
+        "wires": [
+            [
+                "cm08p00000000015"
+            ]
+        ]
+    },
+    {
+        "id": "cm08p00000000015",
+        "type": "debug",
+        "z": "cm08ping00000001",
+        "name": "⑥ ลองทุกแบบ (ส่งรูปนี้)",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 770,
+        "y": 420,
+        "wires": []
+    }
+]

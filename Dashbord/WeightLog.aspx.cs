@@ -14,7 +14,7 @@ namespace Dashbord
     /// WeightLog.aspx  — น้ำหนักจากเครื่องชั่ง
     ///   POST (JSON)  {"machine":"Extruder03","weight":40.12,"unit":"g","stable":true,"model":"Super Range","barcode":"S-Range","min":40,"max":40.3,"result":"OK"}
     ///                -> บันทึกลง MySQL weight_log (รับเฉพาะน้ำหนัก > 1.0 g)
-    ///   GET ?format=json&machine=Extruder03&day=yyyy-MM-dd -> รายการชั่งของวันผลิต 08:00-08:00
+    ///   GET ?format=json&machine=Extruder03&day=yyyy-MM-dd -> รายการชั่งของวันผลิต 07:45-07:45
     ///   POST (JSON)  {"live":true, ...}  -> ค่าสดจากตราชั่ง เก็บในหน่วยความจำอย่างเดียว (ไม่ลง DB)
     ///   GET ?format=live&machine=Extruder03 -> ค่าสดล่าสุด (หน้าเว็บดึงทุก 0.4 วิ ให้ตัวเลขวิ่งตามตราชั่ง)
     ///   GET (ไม่มี format) -> หน้าแสดงผล
@@ -39,7 +39,7 @@ namespace Dashbord
             {
                 DateTime day;
                 DateTime start = DateTime.TryParseExact(Request.QueryString["day"] ?? "", "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out day)
-                    ? day.Date.AddHours(CounterStore.ProdDayStart(DateTime.Now).Hour)
+                    ? day.Date + CounterStore.DAY_START
                     : CounterStore.ProdDayStart(DateTime.Now);
                 Reply(200, OeeDb.WeightReport(Clean(Request.QueryString["machine"]), start));
                 return;

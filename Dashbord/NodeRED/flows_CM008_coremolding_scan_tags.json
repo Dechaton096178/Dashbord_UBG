@@ -1,0 +1,278 @@
+[
+    {
+        "id": "cm08tab0000000001",
+        "type": "tab",
+        "label": "CM-008 Core Molding · Scan Tag PLC 192.168.3.100",
+        "disabled": false,
+        "info": "UB-MC-CM-008 Core Molding — สแกนหา Tag ใน PLC Mitsubishi (SLMP/MC protocol)\nใช้เฉพาะ node มาตรฐาน + module net / os ของ Node.js (ไม่ต้องลง package)"
+    },
+    {
+        "id": "cm08000000000001",
+        "type": "comment",
+        "z": "cm08tab0000000001",
+        "name": "1) กล่อง eth0 ต้องเป็น 192.168.3.x (เช่น 192.168.3.2) → Deploy → ให้เครื่องเดิน 2–5 นาที → กด 'สรุปผล' → ดู Debug (filter: all nodes)",
+        "info": "",
+        "x": 470,
+        "y": 40,
+        "wires": []
+    },
+    {
+        "id": "cm08000000000002",
+        "type": "inject",
+        "z": "cm08tab0000000001",
+        "name": "ทุก 1 วินาที",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "1",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "2",
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 140,
+        "y": 120,
+        "wires": [
+            [
+                "cm08000000000003"
+            ]
+        ]
+    },
+    {
+        "id": "cm08000000000003",
+        "type": "function",
+        "z": "cm08tab0000000001",
+        "name": "สแกน Tag PLC UB-MC-CM-008 (192.168.3.100 · TCP 502 / SLMP UDP 8001)",
+        "func": "// @ts-nocheck\n// ===== UB-MC-CM-008 (Core Molding) · Scan Tag PLC Mitsubishi =====\n// หา PLC + protocol เอง (Modbus TCP 502 · SLMP/MC 3E Binary · 3E ASCII · 4E Binary · SLMP UDP 8001/8002) แล้วอ่านทั้งช่วงทุก SCAN_SEC วินาที\n//   Modbus : Holding Register (HR) / Input Register (IR) / Coil (CO) / Discrete Input (DI) · MC : D / W / M / X / Y / B\n// จดว่า register ไหน \"เปลี่ยน\" → ใช้หา Tag ยอดผลิต (Counter) / สถานะ / Cycle time / ชื่อรุ่น โดยดูคู่กับหน้าจอ HMI\n//\n// วิธีใช้:  1) ใส่ HOST (IP PLC) ถ้ารู้ · เว้นว่าง = หาให้เองในวงเดียวกับกล่อง IoT (eth0) + 192.168.3.x (ค่าโรงงาน Mitsubishi)\n//          2) Deploy → ให้เครื่องเดินสัก 2–5 นาที → กดปุ่ม \"สรุปผล\" ดูใน Debug\n//          3) เทียบกับ HMI: ยอดที่เพิ่ม +1 ทุกรอบ = Counter · ค่า 0/1/2/3 ที่เปลี่ยนตอนเครื่องหยุด/เดิน = Status\n// Output 1 = สรุป Tag ที่เปลี่ยน (เรียงตามน่าสนใจ) · Output 2 = ค่าไม่เป็น 0 ทั้งหมด / ข้อความ ASCII · Output 3 = ผลค้นหา / error\nconst MACHINE = \"UB-MC-CM-008\";\nlet   HOST    = \"192.168.3.100\";        // *** IP PLC UB-MC-CM-008 (2026-10-28) · ว่าง \"\" = หาเองใน 192.168.0.x / 192.168.3.x / วง eth0 ***\nconst UDP_PORTS = [8001, 8002, 5000, 5001];   // SLMP UDP (เครื่องนี้ตั้งไว้ 8001 / 8002 ใน GX Works3)\nconst PORTS   = [502, 5000, 5001, 5002, 5003, 5004, 5005, 5006, 5007, 5010, 5011, 5012, 5100, 1025, 1026, 4999, 8000];\nconst TMO     = 2500;\nconst SCAN_SEC = 5;                     // อ่านทั้งช่วงทุก 5 วินาที (inject ส่งทุก 1 วินาที)\nconst BLOCK   = 900;                    // word ต่อ 1 คำสั่ง (MC 3E สูงสุด 960)\n// ช่วงที่สแกน (word) · bit device อ่านเป็น word ละ 16 bit · ถ้า PLC ตอบว่าเกินช่วง จะหยุดที่ตรงนั้นเอง\nconst AREAS_MC = [\n    { dev: \"D\", code: 0xA8, asc: \"D*\", words: 8000, bit: false },   // D0–D7999\n    { dev: \"W\", code: 0xB4, asc: \"W*\", words: 512,  bit: false, hex: true },\n    { dev: \"M\", code: 0x90, asc: \"M*\", words: 500,  bit: true },    // M0–M7999\n    { dev: \"X\", code: 0x9C, asc: \"X*\", words: 64,   bit: true, hex: true },\n    { dev: \"Y\", code: 0x9D, asc: \"Y*\", words: 64,   bit: true, hex: true },\n    { dev: \"B\", code: 0xA0, asc: \"B*\", words: 64,   bit: true, hex: true }\n];\n// Modbus TCP (port 502) · FX5 ค่าเริ่มต้นมักเป็น HR0 = D0 · Coil = Y / M · DI = X (ขึ้นกับ MODBUS Device Assignment ใน GX Works3)\nconst AREAS_MB = [\n    { dev: \"HR\", fc: 3, words: 8000, bit: false },   // Holding Register 0–7999\n    { dev: \"IR\", fc: 4, words: 1024, bit: false },   // Input Register 0–1023\n    { dev: \"CO\", fc: 1, words: 1024, bit: true },    // Coil 0–16383 (เก็บเป็น word ละ 16 bit)\n    { dev: \"DI\", fc: 2, words: 256,  bit: true }     // Discrete Input 0–4095\n];\nconst isMB = cfg => !!cfg && /^MB/.test(cfg.proto);\nlet AREAS = isMB(context.get(\"cfg\")) ? AREAS_MB : AREAS_MC;\n\nif (msg.topic === \"reset\") { context.set(\"st\", null); node.status({ fill: \"grey\", shape: \"ring\", text: \"ล้างสถิติแล้ว\" }); return null; }\nif (msg.topic === \"summary\") { const s = context.get(\"st\"); if (!s) { node.warn(\"ยังไม่มีข้อมูล\"); return null; } node.send(summary(s)); return null; }\nif (msg.topic === \"rehost\") { context.set(\"cfg\", null); context.set(\"host\", null); context.set(\"retryAt\", 0); }\nif (context.get(\"busy\")) return null;\nif (Date.now() - (context.get(\"lastScan\") || 0) < SCAN_SEC * 1000 && msg.topic !== \"rehost\") return null;\ncontext.set(\"busy\", true);\n\n// ---------- การเชื่อมต่อแบบค้างไว้ (PLC รับทีละไม่กี่ connection) ----------\nfunction getConn(host, port, udp) {\n    let c = context.get(\"conn\");\n    if (c && c.host === host && c.port === port && !!c.udp === !!udp && !c.dead) return Promise.resolve(c);\n    if (c && c.sock) { try { c.sock.destroy(); } catch (e) {} }\n    if (udp) return new Promise(res => {      // SLMP แบบ UDP (FX5 ตั้ง SLMP Connection Module เป็น UDP 8001 / 8002)\n        const u = dgram.createSocket(\"udp4\");\n        c = { host, port, udp: true, buf: Buffer.alloc(0), wait: null, dead: false, ready: false,\n              sock: { write: f => u.send(f, port, host), destroy: () => { try { u.close(); } catch (e) {} } } };\n        const kill = (why) => { c.dead = true; c.why = c.why || why; if (c.wait) { const w = c.wait; c.wait = null; w({ err: why }); } };\n        u.on(\"message\", d => { c.buf = Buffer.concat([c.buf, d]); if (c.wait) c.wait(); });\n        u.on(\"error\", e => kill(e.code || e.message));\n        u.bind(() => { c.ready = true; res(c); });\n        context.set(\"conn\", c);\n    });\n    return new Promise(res => {\n        const s = new net.Socket();\n        c = { host, port, sock: s, buf: Buffer.alloc(0), wait: null, dead: false, ready: false };\n        const kill = (why) => { c.dead = true; c.why = c.why || why; if (c.wait) { const w = c.wait; c.wait = null; w({ err: why }); } };\n        s.setNoDelay(true); s.setKeepAlive(true, 10000);\n        s.on(\"data\", d => { c.buf = Buffer.concat([c.buf, d]); if (c.wait) c.wait(); });\n        s.on(\"error\", e => kill(e.code || e.message));\n        s.on(\"close\", () => kill(\"closed\"));\n        const t = setTimeout(() => { if (!c.ready) { kill(\"connect timeout\"); s.destroy(); res(c); } }, TMO);\n        s.connect(port, host, () => { clearTimeout(t); c.ready = true; res(c); });\n        context.set(\"conn\", c);\n    });\n}\nfunction ask(c, frame, need) {\n    return new Promise(res => {\n        if (c.dead || !c.ready) return res({ err: c.why === \"closed\" ? \"PLC ตัดสาย\" : \"ไม่ได้เชื่อมต่อ\" });\n        c.buf = Buffer.alloc(0);\n        const t = setTimeout(() => { c.wait = null; c.dead = true; try { c.sock.destroy(); } catch (e) {} res({ err: \"ไม่ตอบ (timeout)\" }); }, TMO);\n        c.wait = (fail) => {\n            if (fail && fail.err) { clearTimeout(t); return res({ err: fail.err === \"closed\" ? \"PLC ตัดสายหลังส่งคำสั่ง\" : fail.err }); }\n            if (need(c.buf)) { clearTimeout(t); c.wait = null; const b = c.buf; c.buf = Buffer.alloc(0); res({ buf: b }); }\n        };\n        c.sock.write(frame);\n    });\n}\nconst sleep = ms => new Promise(r => setTimeout(r, ms));\nconst hx = (v, w) => v.toString(16).toUpperCase().padStart(w, \"0\");\n\n// ---------- frame อ่านแบบ word (0401 / sub 0000) ----------\nfunction frBin(is4e, area, start, n) {\n    const o = is4e ? 4 : 0, b = Buffer.alloc(21 + o);\n    if (is4e) { b.writeUInt16LE(0x0054, 0); b.writeUInt16LE(1, 2); b.writeUInt16LE(0, 4); } else b.writeUInt16LE(0x0050, 0);\n    b[2 + o] = 0; b[3 + o] = 0xFF; b.writeUInt16LE(0x03FF, 4 + o); b[6 + o] = 0;\n    b.writeUInt16LE(12, 7 + o); b.writeUInt16LE(0x0010, 9 + o); b.writeUInt16LE(0x0401, 11 + o); b.writeUInt16LE(0, 13 + o);\n    b.writeUIntLE(area.bit ? start * 16 : start, 15 + o, 3); b[18 + o] = area.code; b.writeUInt16LE(n, 19 + o);\n    return b;\n}\nfunction frAsc(area, start, n) {\n    const dn = area.bit ? start * 16 : start;\n    const no = area.hex ? hx(dn, 6) : String(dn).padStart(6, \"0\");\n    return Buffer.from(\"500000FF03FF00\" + \"0018\" + \"0010\" + \"0401\" + \"0000\" + area.asc + no + hx(n, 4), \"latin1\");\n}\nlet tid = 0;\nasync function readMb(c, unit, area, start, n) {\n    const a0 = area.bit ? start * 16 : start, q = area.bit ? n * 16 : n;\n    tid = (tid + 1) & 0xFFFF;\n    const r = await ask(c, Buffer.from([tid >> 8, tid & 255, 0, 0, 0, 6, unit, area.fc, (a0 >> 8) & 255, a0 & 255, q >> 8, q & 255]),\n                        b => b.length >= 9 && b.length >= 6 + b.readUInt16BE(4));\n    if (r.err) return r;\n    const b = r.buf;\n    if (b[7] & 0x80) return { err: \"Modbus exception \" + b[8] + (b[8] === 2 ? \" (address เกินช่วง)\" : b[8] === 1 ? \" (ไม่รองรับ function)\" : \"\"), code: b[8] || 99 };\n    if (b[7] !== area.fc) return { err: \"ไม่ใช่ Modbus (\" + b.slice(0, 9).toString(\"hex\") + \")\" };\n    const v = [];\n    if (area.bit) for (let i = 0; i < n; i++) v.push((b[9 + i * 2] || 0) | ((b[10 + i * 2] || 0) << 8));\n    else for (let i = 0; i < n; i++) v.push(b.readUInt16BE(9 + i * 2));\n    return { v };\n}\nasync function readBlock(c, proto, area, start, n) {\n    if (/^MB/.test(proto)) return readMb(c, +proto.slice(2), area, start, n);\n    if (proto === \"MC3E-ASCII\") {\n        const r = await ask(c, frAsc(area, start, n), b => b.length >= 18 && b.length >= 18 + parseInt(b.toString(\"latin1\", 14, 18), 16));\n        if (r.err) return r;\n        const s = r.buf.toString(\"latin1\");\n        if (!s.startsWith(\"D000\")) return { err: \"ไม่ใช่ MC ASCII (\" + s.slice(0, 12) + \")\" };\n        const end = s.slice(18, 22);\n        if (end !== \"0000\") return { err: \"end code 0x\" + end, code: parseInt(end, 16) };\n        const v = []; for (let i = 0; i < n; i++) v.push(parseInt(s.substr(22 + i * 4, 4), 16)); return { v };\n    }\n    const is4e = proto === \"MC4E\", o = is4e ? 4 : 0;\n    const r = await ask(c, frBin(is4e, area, start, n), b => b.length >= 11 + o && b.length >= 9 + o + b.readUInt16LE(7 + o));\n    if (r.err) return r;\n    if (r.buf.readUInt16LE(0) !== (is4e ? 0x00D4 : 0x00D0)) return { err: \"ไม่ใช่ MC (\" + r.buf.slice(0, 8).toString(\"hex\") + \")\" };\n    const end = r.buf.readUInt16LE(9 + o);\n    if (end !== 0) return { err: \"end code 0x\" + hx(end, 4), code: end };\n    const v = []; for (let i = 0; i < n; i++) v.push(r.buf.readUInt16LE(11 + o + i * 2)); return { v };\n}\n\n// ---------- หา PLC ----------\nconst PROTOS = [\"MC3E\", \"MC3E-ASCII\", \"MC4E\"];\nfunction portOpen(ip, port, ms) {\n    return new Promise(res => {\n        const s = new net.Socket(); let done = false;\n        const fin = ok => { if (done) return; done = true; try { s.destroy(); } catch (e) {} res(ok); };\n        s.setTimeout(ms); s.on(\"timeout\", () => fin(false)); s.on(\"error\", () => fin(false));\n        s.connect(port, ip, () => fin(true));\n    });\n}\nasync function findHosts(report) {\n    const own = [], subnets = new Set([\"192.168.0\", \"192.168.3\"]);   // 192.168.0.x = วง PLC ที่หน้างานใช้ (เหมือน Seambuffing)\n    const ifs = os.networkInterfaces();\n    for (const k of Object.keys(ifs)) for (const a of ifs[k] || []) {\n        if (a.family !== \"IPv4\" && a.family !== 4 || a.internal) continue;\n        own.push(a.address);\n        const p = a.address.split(\".\");\n        if (!/^(10\\.121|192\\.168\\.33|192\\.168\\.100)\\./.test(a.address)) subnets.add(p.slice(0, 3).join(\".\"));   // ไม่สแกนวงโรงงาน / cloud\n    }\n    report.push(\"IP กล่องนี้: \" + own.join(\", \") + \" · สแกนวง: \" + [...subnets].map(s => s + \".x\").join(\", \"));\n    const found = [], QP = [5000, 5001, 5002, 5007, 5010, 5100, 1025, 502];\n    for (const sn of subnets) for (let base = 1; base < 255; base += 32) {\n        node.status({ fill: \"blue\", shape: \"ring\", text: \"หา PLC \" + sn + \".\" + base + \"–\" + Math.min(254, base + 31) });\n        const jobs = [];\n        for (let i = base; i < Math.min(255, base + 32); i++) {\n            const ip = sn + \".\" + i; if (own.includes(ip)) continue;\n            jobs.push(Promise.all(QP.map(p => portOpen(ip, p, 500).then(ok => ok ? p : null))).then(ps => { ps = ps.filter(Boolean); if (ps.length) found.push({ ip, ports: ps }); }));\n        }\n        await Promise.all(jobs);\n    }\n    report.push(found.length ? \"เจอเครื่องที่เปิด port: \" + found.map(f => f.ip + \" [\" + f.ports.join(\",\") + \"]\").join(\" · \") : \"ไม่เจอเครื่องที่เปิด port PLC ในวงที่สแกน\");\n    return found;\n}\nasync function discover() {\n    const report = [];\n    let hosts = HOST ? [{ ip: HOST, ports: PORTS }] : await findHosts(report);\n    for (const h of hosts) {\n        const ports = h.ports.concat(PORTS.filter(p => !h.ports.includes(p)));\n        for (const port of ports) {\n            const protos = port === 502 ? [\"MB1\", \"MB0\", \"MB255\"].concat(PROTOS) : PROTOS;   // บางเครื่องตั้ง SLMP ไว้ที่ port 502\n            for (const proto of protos) {\n                node.status({ fill: \"blue\", shape: \"ring\", text: \"ทดสอบ \" + h.ip + \":\" + port + \" \" + proto });\n                const c = await getConn(h.ip, port, false);\n                if (c.dead) { report.push(h.ip + \":\" + port + \" ต่อไม่ได้ (\" + c.why + \")\"); break; }\n                const r = await readBlock(c, proto, /^MB/.test(proto) ? AREAS_MB[0] : AREAS_MC[0], 0, 10);\n                if (r.v) { report.push(\"✓ \" + h.ip + \":\" + port + \" \" + proto + \" ใช้ได้\"); return { cfg: { host: h.ip, port, proto }, report }; }\n                report.push(h.ip + \":\" + port + \" \" + proto + \": \" + r.err);\n                c.dead = true; try { c.sock.destroy(); } catch (e) {}\n                await sleep(250);\n            }\n            if (HOST && hosts.length === 1 && report.length > 60) break;\n        }\n    }\n    // SLMP แบบ UDP\n    for (const h of hosts) for (const port of UDP_PORTS) for (const proto of [\"MC3E\", \"MC3E-ASCII\", \"MC4E\"]) {\n        node.status({ fill: \"blue\", shape: \"ring\", text: \"ทดสอบ UDP \" + h.ip + \":\" + port + \" \" + proto });\n        const c = await getConn(h.ip, port, true);\n        const r = await readBlock(c, proto, AREAS_MC[0], 0, 10);\n        if (r.v) { report.push(\"✓ UDP \" + h.ip + \":\" + port + \" \" + proto + \" ใช้ได้\"); return { cfg: { host: h.ip, port, proto, udp: true }, report }; }\n        report.push(\"UDP \" + h.ip + \":\" + port + \" \" + proto + \": \" + r.err);\n        c.dead = true; try { c.sock.destroy(); } catch (e) {}\n    }\n    report.push(\"→ ไม่เจอ: เช็คสาย LAN กล่อง eth0 ↔ PLC, IP วงเดียวกัน, และใน GX Works เปิด SLMP / MC protocol (Open setting: TCP, Binary, port 5000/5100) + เปิด 'Enable online change'\");\n    return { report };\n}\n\n// ---------- อ่านทุกช่วง ----------\nasync function scanAll(cfg) {\n    const blk = isMB(cfg) ? 125 : BLOCK;        // Modbus อ่านได้สูงสุด 125 register / 2000 coil ต่อครั้ง\n    const c = await getConn(cfg.host, cfg.port, cfg.udp);\n    if (c.dead) return { err: \"ต่อไม่ได้ (\" + c.why + \")\" };\n    const lim = context.get(\"lim\") || {}, snap = {};\n    for (const a of AREAS) {\n        const max = lim[a.dev] != null ? lim[a.dev] : a.words;\n        const arr = [];\n        for (let s = 0; s < max; s += blk) {\n            const n = Math.min(blk, max - s);\n            let r = await readBlock(c, cfg.proto, a, s, n);\n            if (r.code) {                         // เกินช่วง / ไม่มี device นี้ -> ลองลดขนาด แล้วจำขอบเขตไว้\n                let lo = 0, hi = n - 1, best = null;    // หาขอบเขตจริงแบบแบ่งครึ่ง\n                while (lo <= hi) { const m = (lo + hi + 1) >> 1; if (m === 0) break; const t = await readBlock(c, cfg.proto, a, s, m); if (t.v) { best = t.v; lo = m + 1; } else hi = m - 1; }\n                if (best) arr.push(...best);\n                lim[a.dev] = s + (best ? best.length : 0); context.set(\"lim\", lim);\n                break;\n            }\n            if (r.err) return { err: a.dev + s + \": \" + r.err };\n            arr.push(...r.v);\n        }\n        snap[a.dev] = arr;\n    }\n    return { snap };\n}\n\n// ---------- สถิติ ----------\nfunction addr(a, i) { return a.hex ? a.dev + hx(i, 1) : a.dev + i; }\nfunction bitAddr(a, w, b) { const n = w * 16 + b; return a.hex ? a.dev + hx(n, 1) : a.dev + n; }\nfunction update(st, snap) {\n    const now = Date.now();\n    st.n++; st.last = now;\n    for (const a of AREAS) {\n        const v = snap[a.dev] || [];\n        const S = st.dev[a.dev] = st.dev[a.dev] || { first: v.slice(), prev: v.slice(), chg: {}, up: {}, dn: {}, mn: {}, mx: {}, inc1: {}, bchg: {} };\n        for (let i = 0; i < v.length; i++) {\n            const p = S.prev[i], x = v[i];\n            if (p === undefined || p === x) continue;\n            if (a.bit) { let d = p ^ x; for (let b = 0; b < 16; b++) if (d & (1 << b)) { const k = i * 16 + b; S.bchg[k] = (S.bchg[k] || 0) + 1; } continue; }\n            S.chg[i] = (S.chg[i] || 0) + 1;\n            if (x > p) { S.up[i] = (S.up[i] || 0) + 1; if (x - p <= 3) S.inc1[i] = (S.inc1[i] || 0) + 1; } else S.dn[i] = (S.dn[i] || 0) + 1;\n            S.mn[i] = Math.min(S.mn[i] != null ? S.mn[i] : p, x); S.mx[i] = Math.max(S.mx[i] != null ? S.mx[i] : p, x);\n        }\n        S.prev = v.slice();\n    }\n}\nfunction s16(x) { return x > 32767 ? x - 65536 : x; }\nfunction guess(c, up, dn, inc1, mn, mx) {\n    if (up >= 2 && dn === 0 && inc1 >= up * 0.6) return \"⭐ Counter? (เพิ่มทีละน้อย ไม่ลด)\";\n    if (up >= 2 && dn === 0) return \"เพิ่มอย่างเดียว (Counter / เวลาสะสม?)\";\n    if (mx - mn <= 10 && c >= 2) return \"ค่าเล็ก สลับไปมา (Status / Step?)\";\n    if (c >= 3) return \"แกว่ง (Analog / Timer / CT?)\";\n    return \"\";\n}\nfunction summary(st) {\n    const rows = [], bits = [], nz = {}, ascii = [];\n    const mins = ((st.last - st.t0) / 60000).toFixed(1);\n    for (const a of AREAS) {\n        const S = st.dev[a.dev]; if (!S) continue;\n        const v = S.prev;\n        if (!a.bit) {\n            for (const k of Object.keys(S.chg)) {\n                const i = +k, c = S.chg[i], up = S.up[i] || 0, dn = S.dn[i] || 0;\n                const row = { tag: addr(a, i), now: v[i], signed: s16(v[i]), first: S.first[i], min: S.mn[i], max: S.mx[i], changes: c, up, down: dn,\n                              guess: guess(c, up, dn, S.inc1[i] || 0, S.mn[i], S.mx[i]) };\n                // 32 bit (คำต่ำ i + คำสูง i+1) ถ้าคำถัดไปไม่เป็น 0 หรือคำนี้เคยล้น\n                if (v[i + 1]) row.dword = v[i] + v[i + 1] * 65536 + \" (\" + addr(a, i) + \"-\" + addr(a, i + 1) + \")\";\n                row.score = (row.guess.startsWith(\"⭐\") ? 1000 : 0) + (dn === 0 && up > 0 ? 300 : 0) + Math.min(c, 200);\n                rows.push(row);\n            }\n            // ค่าไม่เป็น 0 + ข้อความ ASCII (ชื่อรุ่น / Lot)\n            const list = []; let run = \"\";\n            for (let i = 0; i < v.length; i++) {\n                if (v[i]) list.push(addr(a, i) + \"=\" + v[i]);\n                const lo = v[i] & 255, hi = v[i] >> 8, pr = ch => ch >= 32 && ch < 127;\n                if (v[i] && pr(lo) && (pr(hi) || hi === 0)) { if (!run) run = { at: addr(a, i), s: \"\" }; run.s += String.fromCharCode(lo) + (hi ? String.fromCharCode(hi) : \"\"); }\n                else { if (run && run.s.replace(/[^A-Za-z]/g, \"\").length >= 3) ascii.push(run.at + ' \"' + run.s + '\"'); run = \"\"; }\n            }\n            if (list.length) nz[a.dev] = list.length > 400 ? list.slice(0, 400).concat([\"... อีก \" + (list.length - 400)]) : list;\n        } else {\n            const on = [];\n            for (let w = 0; w < v.length; w++) for (let b = 0; b < 16; b++) if (v[w] & (1 << b)) on.push(bitAddr(a, w, b));\n            if (on.length) nz[a.dev + \" (ON)\"] = on.length > 300 ? on.slice(0, 300).concat([\"... อีก \" + (on.length - 300)]) : on;\n            for (const k of Object.keys(S.bchg)) { const n = +k; bits.push({ tag: bitAddr(a, Math.floor(n / 16), n % 16), now: (v[Math.floor(n / 16)] >> (n % 16)) & 1, toggles: S.bchg[n] }); }\n        }\n    }\n    rows.sort((x, y) => y.score - x.score); rows.forEach(r => delete r.score);\n    bits.sort((x, y) => y.toggles - x.toggles);\n    const lim = context.get(\"lim\") || {};\n    return [\n        { topic: MACHINE + \" · Tag ที่เปลี่ยน (\" + st.n + \" รอบ / \" + mins + \" นาที) · word \" + rows.length + \" · bit \" + bits.length,\n          payload: AREAS === AREAS_MB\n              ? { note: \"Modbus: HR = Holding Register · FX5 ค่าเริ่มต้น HR n = D n · CO = Coil (Y/M) · DI = X · เช็ค MODBUS Device Assignment ใน GX Works3\", words: rows.slice(0, 150), bits: bits.slice(0, 150) }\n              : { words: rows.slice(0, 150), bits: bits.slice(0, 150) } },\n        { topic: MACHINE + \" · ค่าไม่เป็น 0 ตอนนี้ + ข้อความ ASCII\", payload: { ascii, nonZero: nz, range: lim } },\n        null\n    ];\n}\n\n(async () => {\n    try {\n        let cfg = context.get(\"cfg\");\n        if (!cfg) {\n            if (Date.now() < (context.get(\"retryAt\") || 0)) return;\n            const d = await discover();\n            node.send([null, null, { topic: \"ผลค้นหา PLC \" + MACHINE, payload: d.report }]);\n            if (!d.cfg) { node.status({ fill: \"red\", shape: \"ring\", text: \"หา PLC ไม่เจอ ดู Debug (ลองใหม่ทุก 2 นาที)\" }); context.set(\"retryAt\", Date.now() + 120000); return; }\n            cfg = d.cfg; context.set(\"cfg\", cfg); context.set(\"lim\", {}); context.set(\"st\", null);\n            AREAS = isMB(cfg) ? AREAS_MB : AREAS_MC;\n        }\n        const r = await scanAll(cfg);\n        context.set(\"lastScan\", Date.now());\n        if (!r.snap) {\n            const n = (context.get(\"fail\") || 0) + 1; context.set(\"fail\", n);\n            node.status({ fill: \"red\", shape: \"ring\", text: cfg.host + \":\" + cfg.port + \" \" + r.err + \" (\" + n + \")\" });\n            if (n >= 20) { context.set(\"cfg\", null); context.set(\"fail\", 0); }\n            return;\n        }\n        context.set(\"fail\", 0);\n        let st = context.get(\"st\");\n        if (!st) st = { t0: Date.now(), n: 0, dev: {} };\n        update(st, r.snap); context.set(\"st\", st);\n        flow.set(\"cm08_raw\", r.snap); flow.set(\"cm08_ok\", Date.now());\n        let nw = 0, nb = 0; for (const k in st.dev) { nw += Object.keys(st.dev[k].chg).length; nb += Object.keys(st.dev[k].bchg).length; }\n        node.status({ fill: \"green\", shape: \"dot\", text: (cfg.udp ? \"UDP \" : \"\") + cfg.proto + \" \" + cfg.host + \":\" + cfg.port + \" · รอบ \" + st.n + \" · word เปลี่ยน \" + nw + \" · bit เปลี่ยน \" + nb });\n        if (st.n === 1 || st.n % 24 === 0) node.send(summary(st));     // ส่งสรุปเองรอบแรก และทุก ~2 นาที\n    } catch (e) {\n        node.status({ fill: \"red\", shape: \"ring\", text: String(e.message || e) });\n        node.send([null, null, { topic: \"error\", payload: String(e.stack || e) }]);\n    } finally {\n        context.set(\"busy\", false);\n    }\n})();\nreturn null;\n",
+        "outputs": 3,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "// ปิดการเชื่อมต่อเมื่อ Deploy / หยุด flow\nconst c = context.get(\"conn\"); if (c && c.sock) { try { c.sock.destroy(); } catch (e) {} }\ncontext.set(\"conn\", null); context.set(\"busy\", false);",
+        "libs": [
+            {
+                "var": "net",
+                "module": "net"
+            },
+            {
+                "var": "os",
+                "module": "os"
+            },
+            {
+                "var": "dgram",
+                "module": "dgram"
+            }
+        ],
+        "x": 420,
+        "y": 180,
+        "wires": [
+            [
+                "cm08000000000004"
+            ],
+            [
+                "cm08000000000005"
+            ],
+            [
+                "cm08000000000006"
+            ]
+        ]
+    },
+    {
+        "id": "cm08000000000004",
+        "type": "debug",
+        "z": "cm08tab0000000001",
+        "name": "① Tag ที่เปลี่ยน (Counter / Status)",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 760,
+        "y": 140,
+        "wires": []
+    },
+    {
+        "id": "cm08000000000005",
+        "type": "debug",
+        "z": "cm08tab0000000001",
+        "name": "② ค่าไม่เป็น 0 + ข้อความ ASCII",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 750,
+        "y": 180,
+        "wires": []
+    },
+    {
+        "id": "cm08000000000006",
+        "type": "debug",
+        "z": "cm08tab0000000001",
+        "name": "③ ผลค้นหา PLC / error",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 730,
+        "y": 220,
+        "wires": []
+    },
+    {
+        "id": "cm08000000000007",
+        "type": "inject",
+        "z": "cm08tab0000000001",
+        "name": "สรุปผล (กดเอง)",
+        "props": [
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "summary",
+        "x": 150,
+        "y": 180,
+        "wires": [
+            [
+                "cm08000000000003"
+            ]
+        ]
+    },
+    {
+        "id": "cm08000000000008",
+        "type": "inject",
+        "z": "cm08tab0000000001",
+        "name": "ล้างสถิติ เริ่มนับใหม่",
+        "props": [
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "reset",
+        "x": 160,
+        "y": 220,
+        "wires": [
+            [
+                "cm08000000000003"
+            ]
+        ]
+    },
+    {
+        "id": "cm08000000000009",
+        "type": "inject",
+        "z": "cm08tab0000000001",
+        "name": "หา PLC ใหม่",
+        "props": [
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "rehost",
+        "x": 140,
+        "y": 260,
+        "wires": [
+            [
+                "cm08000000000003"
+            ]
+        ]
+    },
+    {
+        "id": "cm08000000000010",
+        "type": "comment",
+        "z": "cm08tab0000000001",
+        "name": "2) เจอ Tag แล้ว ใส่ใน WATCH เพื่อดูค่าสดเทียบกับหน้าจอ HMI (HR100 / HR100L = 32 bit / CO8200 / HR200S5 = ข้อความ)",
+        "info": "",
+        "x": 470,
+        "y": 330,
+        "wires": []
+    },
+    {
+        "id": "cm08000000000011",
+        "type": "inject",
+        "z": "cm08tab0000000001",
+        "name": "ทุก 2 วินาที",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "2",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "5",
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 140,
+        "y": 390,
+        "wires": [
+            [
+                "cm08000000000012"
+            ]
+        ]
+    },
+    {
+        "id": "cm08000000000012",
+        "type": "function",
+        "z": "cm08tab0000000001",
+        "name": "ดูค่า Tag ที่เลือก (WATCH)",
+        "func": "// @ts-nocheck\n// ===== ดูค่า Tag ที่สนใจแบบสด (จากผลสแกนล่าสุด ไม่ต่อ PLC เพิ่ม) =====\n// ใส่ Tag ที่เจอจากสรุปผล แล้ว Deploy · Modbus: \"HR100\" / \"HR100L\" / \"CO8200\" · MC: \"D100\" = 16 bit · \"D100L\" = 32 bit (D100 คำต่ำ + D101 คำสูง) · \"M98\" = bit · \"D200S5\" = ข้อความ 5 word\nconst WATCH = [\"HR0\", \"HR1\", \"HR2\", \"CO0\"];   // *** แก้ตรงนี้ ***\nconst raw = flow.get(\"cm08_raw\");\nif (!raw || Date.now() - (flow.get(\"cm08_ok\") || 0) > 20000) { node.status({ fill: \"grey\", shape: \"ring\", text: \"ยังไม่มีข้อมูลสแกน\" }); return null; }\nconst HEXDEV = { X: 1, Y: 1, B: 1, W: 1 };\nconst out = {};\nfor (const t of WATCH) {\n    const m = /^(HR|IR|CO|DI|[A-Z])([0-9A-F]+?)(L|S(\\d+))?$/i.exec(String(t).trim());\n    if (!m) { out[t] = \"รูปแบบไม่ถูก\"; continue; }\n    const dev = m[1].toUpperCase(), n = parseInt(m[2], HEXDEV[dev] ? 16 : 10), arr = raw[dev];\n    if (!arr) { out[t] = \"ไม่ได้สแกน \" + dev; continue; }\n    if (/^(M|X|Y|B|CO|DI)$/.test(dev)) { const w = arr[Math.floor(n / 16)]; out[t] = w == null ? \"เกินช่วง\" : (w >> (n % 16)) & 1; continue; }\n    if (arr[n] == null) { out[t] = \"เกินช่วง\"; continue; }\n    if (m[3] && m[3].toUpperCase() === \"L\") out[t] = arr[n] + (arr[n + 1] || 0) * 65536;\n    else if (m[4]) { let s = \"\"; for (let i = 0; i < +m[4]; i++) { const w = arr[n + i] || 0; s += String.fromCharCode(w & 255, w >> 8); } out[t] = s.replace(/\\0/g, \"\").trim(); }\n    else out[t] = arr[n];\n}\nnode.status({ fill: \"green\", shape: \"dot\", text: Object.keys(out).map(k => k + \"=\" + out[k]).join(\"  \").slice(0, 120) });\nmsg.payload = out; msg.topic = \"CM-008 Tag สด \" + new Date().toLocaleTimeString(\"en-GB\");\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 390,
+        "y": 390,
+        "wires": [
+            [
+                "cm08000000000013"
+            ]
+        ]
+    },
+    {
+        "id": "cm08000000000013",
+        "type": "debug",
+        "z": "cm08tab0000000001",
+        "name": "Tag สด",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 610,
+        "y": 390,
+        "wires": []
+    }
+]

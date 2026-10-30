@@ -354,7 +354,13 @@
         }
 
         load();
-        timer = setInterval(load, 5000);
+        // ข้ามเที่ยงคืนขณะดูวันนี้ -> เปลี่ยนเป็นวันใหม่เอง (จอเปิดค้าง)
+        var lastToday = ymd(new Date());
+        timer = setInterval(function () {
+            var t = ymd(new Date());
+            if (t !== lastToday) { if (dayIn.value === lastToday) dayIn.value = t; lastToday = t; }
+            load();
+        }, 5000);
     })();
 </script>
 </asp:Content>

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 
 namespace Dashbord
@@ -127,9 +127,10 @@ namespace Dashbord
                 Name = "Maintenance",
                 Icon = "M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.5-.5-.5-2.5 2.5-2.5z",
                 Items = new List<MenuItem> {
+                    new MenuItem("Repair Request (แจ้งซ่อม)", "Maintenance.aspx"),   // แจ้งซ่อม → รับงาน → ซ่อมเสร็จ → ปิดงาน + LINE + QR ติดเครื่อง
+                    new MenuItem("Repair Dashboard", "Maintenance.aspx?tab=dash"), // MTTR / MTBF / Top เครื่องเสีย (โหมดทีวี)
                     new MenuItem("Water Tank", "WaterTank.aspx"),             // ถังน้ำ 3 ระดับ (ลูกลอย) + แจ้ง LINE
                     new MenuItem("PM Schedule", null),
-                    new MenuItem("Breakdown Log", null),
                     new MenuItem("Spare Parts", null),
                 }
             },
@@ -176,12 +177,13 @@ namespace Dashbord
                 Name = "HR",
                 Icon = "M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z M2 21v-1a6 6 0 0 1 6-6h2a6 6 0 0 1 6 6v1 M17 11a3 3 0 1 0 0-6 M22 21v-1a5 5 0 0 0-4-4.9",
                 Items = new List<MenuItem> {
-                    new MenuItem("Employee Directory", null),
-                    new MenuItem("Time Attendance", null),
-                    new MenuItem("Leave Request", null),
-                    new MenuItem("Overtime (OT)", null),
+                    new MenuItem("Employee Directory", "HrEmployee.aspx"),    // ทะเบียนพนักงาน (ต้องล็อกอิน HrLogin.aspx ก่อน)
+                    new MenuItem("Time Attendance", "TimeAttendance.aspx"),    // เวลาเข้า-ออกงาน จากไฟล์เครื่องสแกน (สาย / OT / ไม่มีสแกน)
+                    new MenuItem("Leave Request", "LeaveRequest.aspx"),          // ใบลา UBG-FM-HR-09 + สิทธิ์วันลา
+                    new MenuItem("Overtime (OT)", "OtRequest.aspx"),             // ใบขอ OT UBG-FM-HR-07 + เทียบเวลาสแกน
                     new MenuItem("Training Record", null),
                     new MenuItem("Manpower by Line", null),
+                    new MenuItem("HR Users", "HrUsers.aspx"),                // ผู้ใช้ระบบ HR (เฉพาะ admin)
                 }
             },
             new Dept {

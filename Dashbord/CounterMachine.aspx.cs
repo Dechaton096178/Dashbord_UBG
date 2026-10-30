@@ -22,6 +22,7 @@ namespace Dashbord
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            Maintenance.StartReminder();   // ตัวเตือนงานซ่อมด่วนค้าง (Node-RED ส่งข้อมูลเข้าหน้านี้ตลอด -> เริ่มทำงานแม้ไม่มีใครเปิดหน้าแจ้งซ่อม)
             Response.Cache.SetCacheability(HttpCacheability.NoCache);
             string method = Request.HttpMethod.ToUpperInvariant();
 
@@ -49,7 +50,7 @@ namespace Dashbord
                 DateTime day;
                 DateTime dayStart = DateTime.TryParseExact(Request.QueryString["day"], "yyyy-MM-dd",
                         System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out day)
-                    ? day.Date.AddHours(CounterStore.ProdDayStart(DateTime.Now).Hour)
+                    ? day.Date + CounterStore.DAY_START
                     : CounterStore.ProdDayStart(DateTime.Now);
                 Reply(200, Request.QueryString["kind"] == "ng" ? ErpQuality.NgDetail(mc, dayStart) : OeeDb.StatusLog(mc, dayStart));
                 return;

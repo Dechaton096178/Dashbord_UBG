@@ -300,7 +300,8 @@
     applyTv();
 
     // ---------- date ----------
-    function setDay(d) { st.day = d; $('pdDay').value = d; st.eq = ''; syncUrl(); load(); }
+    function setDay(d) { st.day = d; st.follow = d === shiftToday(); $('pdDay').value = d; st.eq = ''; syncUrl(); load(); }
+    st.follow = st.day === shiftToday();   // กำลังดู "วันนี้" -> ข้ามวันผลิต (08:00) แล้วเปลี่ยนวันให้เอง
     function addDays(d, n) { var x = new Date(d + 'T12:00:00'); x.setDate(x.getDate() + n); return x.getFullYear() + '-' + pad(x.getMonth() + 1) + '-' + pad(x.getDate()); }
     $('pdDay').onchange = function () { if (this.value) setDay(this.value); };
     $('pdPrev').onclick = function () { setDay(addDays(st.day, -1)); };
@@ -607,7 +608,9 @@
     window.addEventListener('resize', function () { applyScale(); clearTimeout(rT); rT = setTimeout(render, 120); });
     syncUrl();
     load();
-    setInterval(load, REFRESH_MS);
+    // รีเฟรชทุก 1 นาที · ถ้ากำลังดูวันนี้แล้วข้ามวันผลิต -> เปลี่ยนเป็นวันใหม่ (จอทีวีเปิดค้าง)
+    setInterval(function () { var t = shiftToday(); if (st.follow && st.day !== t) { setDay(t); return; } load(); }, REFRESH_MS);
+    setInterval(function () { var t = shiftToday(); if (st.follow && st.day !== t) setDay(t); }, 15000);
 })();
 </script>
 </asp:Content>

@@ -266,6 +266,17 @@
     $('mdBack').addEventListener('click', function (e) { if (e.target === $('mdBack')) closeMd(); });
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeMd(); });
 
+    // ข้ามวันผลิต (08:00) : ถ้าช่วงที่ดูจบที่ "วันนี้" -> เลื่อนทั้งช่วงไปตามวันใหม่ (จำนวนวันเท่าเดิม)
+    var lastToday = ymd(prodToday());
+    setInterval(function () {
+        var t = ymd(prodToday());
+        if (t === lastToday) return;
+        if (st.to === lastToday) {
+            var n = Math.round((new Date(t + 'T00:00:00') - new Date(lastToday + 'T00:00:00')) / 864e5), f = new Date(st.from + 'T00:00:00');
+            f.setDate(f.getDate() + n); st.from = ymd(f); st.to = t; $('dFrom').value = st.from; $('dTo').value = st.to; load();
+        }
+        lastToday = t;
+    }, 30000);
     setInterval(function () { if (!document.hidden && st.to === ymd(prodToday())) load(); }, 300000);
     load();
 })();

@@ -13,7 +13,7 @@ namespace Dashbord
     // =====================================================================
     // OEE Dashboard (แบบ OEE History) — สูตรเดียวกับ MC Monitor
     //   A, P = สถานะ / Shot จากเครื่อง (OEE.mc_daily)   Q = Good / (Good + NG) จาก ERP ตาม EQID
-    //   วันผลิต 08:00–08:00
+    //   วันผลิต 07:45–07:45 (CounterStore.DAY_START)
     //
     //   GET ?format=hist&from=yyyy-MM-dd&to=yyyy-MM-dd[&proc=Injection][&machine=MC13]
     //     -> daily  : OEE รายวัน (ทุกเครื่องรวมกัน หรือเครื่องเดียว)
@@ -92,7 +92,7 @@ namespace Dashbord
             DateTime day;
             if (!DateTime.TryParseExact(dayStr ?? "", "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out day))
                 day = CounterStore.ProdDayStart(DateTime.Now).Date;
-            DateTime dayStart = day.Date.AddHours(CounterStore.DAY_START_HOUR);
+            DateTime dayStart = day.Date + CounterStore.DAY_START;
             var list = (machines ?? "").Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim()).Where(x => x.Length > 0).Distinct().Take(200).ToList();
             var items = new ConcurrentDictionary<string, object>();
             Parallel.ForEach(list, new ParallelOptions { MaxDegreeOfParallelism = 6 }, mc =>

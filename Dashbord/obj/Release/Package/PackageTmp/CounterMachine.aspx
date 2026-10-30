@@ -310,15 +310,19 @@
     .dt-tl { position:relative; height:26px; border-radius:8px; overflow:hidden; background:var(--track); display:flex; margin:4px 0 4px; }
     .dt-tl i { display:block; height:100%; }
     .dt-tl i.run { background:var(--run); } .dt-tl i.idle { background:var(--idle); } .dt-tl i.down { background:var(--down); } .dt-tl i.off { background:var(--off); } .dt-tl i.none { background:transparent; }
+    .dt-htw { overflow-x:auto; margin:4px 0 10px; scrollbar-color:#475569 transparent; }
+    .dt-htw::-webkit-scrollbar { height:10px; } .dt-htw::-webkit-scrollbar-thumb { background:#475569; border-radius:8px; }
+    .dt-htw .dt-ht { min-width:2400px; margin:0 0 4px; }
     .dt-ht { width:100%; table-layout:fixed; border-collapse:collapse; margin:4px 0 10px; font-variant-numeric:tabular-nums; }
     .dt .dt-ht th, .dt .dt-ht td { position:static; border:1px solid var(--line); padding:5px 2px; text-align:center; font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .dt .dt-ht th { background:var(--card2); color:var(--mute); font-weight:800; letter-spacing:0; text-transform:none; }
     .dt .dt-ht td { font-weight:800; color:var(--ink); font-size:12px; }
+    .dt .dt-ht thead th { padding:6px 2px; font-size:11.5px; }
     .dt .dt-ht td.zero { color:var(--mute); font-weight:600; }
     .dt .dt-ht td.cur, .dt .dt-ht th.cur { background:rgba(99,102,241,.16); }
     .dt .dt-ht td.best { color:#34d399; }
     .dt .dt-ht .tot { background:rgba(99,102,241,.22); color:var(--ink); }
-    .dt-hr { display:grid; grid-template-columns:repeat(24, 1fr); gap:2px; align-items:end; height:58px; margin:2px 0 4px; }
+    .dt-hr { display:grid; grid-template-columns:repeat(25, 1fr); gap:2px; align-items:end; height:58px; margin:2px 0 4px; }
     .dt-hr div { display:flex; flex-direction:column; justify-content:flex-end; align-items:center; height:100%; min-width:0; }
     .dt-hr b { font-size:10px; font-weight:800; color:var(--ink); line-height:1.1; white-space:nowrap; font-variant-numeric:tabular-nums; }
     .dt-hr i { display:block; width:100%; border-radius:3px 3px 0 0; background:#6366f1; min-height:2px; margin-top:2px; }
@@ -415,7 +419,7 @@
             <div class="dt-h">
                 <div><h3 id="dtTitle">–</h3><small id="dtSub">–</small></div>
                 <span class="pill" id="dtPill"></span>
-                <input type="date" id="dtDay" title="Production day (starts 08:00)" />
+                <input type="date" id="dtDay" title="Production day (starts 07:45)" />
                 <button type="button" id="dtClose" title="Close (Esc)">×</button>
             </div>
             <div class="dt-tabs">
@@ -442,6 +446,28 @@
 <asp:Content ID="cScript" ContentPlaceHolderID="ScriptContent" runat="server">
 <script>
     // @ts-nocheck
+    // ---- เวลาเริ่มวันผลิต (จาก CounterStore.DAY_START บน Server) · ช่องรายชั่วโมง 07:45–07:59 | 08:00–08:59 | ... | 07:00–07:44 ----
+    <%= Dashbord.CounterStore.JsDayStart %>
+    var DS_TXT = ('0' + DS_H).slice(-2) + ':' + ('0' + DS_M).slice(-2);
+    function slotLbl(i) { return i === 0 ? DS_TXT : ('0' + ((DS_H + i) % 24)).slice(-2) + ':00'; }
+    function slotOf(t0, t) {                                   // t0, t = ms · ช่องของเวลา t ในวันที่เริ่ม t0 (-1 = นอกวัน)
+        var m = (t - t0) / 60000, f = DS_M ? 60 - DS_M : 0;
+        if (m < 0 || m >= 1440) return -1;
+        if (f && m < f) return 0;
+        var i = Math.floor((m - f) / 60) + (f ? 1 : 0);
+        return i < NSLOT ? i : -1;
+    }
+    function curSlot(t0, t) { return t >= t0 + 864e5 ? NSLOT - 1 : slotOf(t0, t); }
+    function tickLbl(h) { var m = DS_H * 60 + DS_M + h * 60; return ('0' + (Math.floor(m / 60) % 24)).slice(-2) + ':' + ('0' + (m % 60)).slice(-2); }
+    function beforeDs(d) { return d.getHours() * 60 + d.getMinutes() < DS_H * 60 + DS_M; }
+    function slotEnd(i) {                                       // เวลาสิ้นสุดช่อง เช่น 07:59 · 08:59 · 07:44
+        var e = DS_M && i === NSLOT - 1 ? DS_M - 1 : 59, h = DS_M && i === NSLOT - 1 ? DS_H : (DS_H + i) % 24;
+        return ('0' + h).slice(-2) + ':' + ('0' + e).slice(-2);
+    }
+    function slotRange(i) { return slotLbl(i) + '-' + slotEnd(i); }                 // 07:45-07:59
+    function slotTh(i) { return slotLbl(i) + '-<br>' + slotEnd(i); }                // หัวคอลัมน์ 2 บรรทัดในช่องเดียว
+    function slotMin(i) { return DS_M && i === 0 ? 60 - DS_M : DS_M && i === NSLOT - 1 ? DS_M : 60; }   // ความยาวช่อง (นาที)
+    function slotHours(n) { var s = 0; for (var i = 0; i < n && i < NSLOT; i++) s += slotMin(i); return s / 60; }   // ชั่วโมงรวมของ n ช่องแรก
     (function () {
         var REFRESH_MS = 3000;
         // ชื่อเครื่องจาก Node-RED -> รหัสเครื่อง (ตามตาราง 机台号)
@@ -609,13 +635,13 @@
                 '</div>' +
               '</div>' +
 
-              // ตัวใหญ่ = ยอดรวมทั้งวัน (2 กะ ตั้งแต่ 08:00 ไม่หายแม้หน้าเครื่องรีเซ็ต) | ขวา = Counter ปัจจุบันบนหน้าเครื่อง
+              // ตัวใหญ่ = ยอดรวมทั้งวัน (2 กะ ตั้งแต่ 07:45 ไม่หายแม้หน้าเครื่องรีเซ็ต) | ขวา = Counter ปัจจุบันบนหน้าเครื่อง
               '<div class="cnt"><div class="cday"><span>Total today</span><div><b>' + fmt(m.piecesToday) + '</b><em>pcs</em></div></div>' +
                 '<div class="cnow"><span>Counter now</span><b>' + fmt(m.piecesCounter) + '</b></div></div>' +
 
               (hasQ
                 ? (erpQ
-                    ? '<div class="okng" title="ยอดจาก ERP (พนักงานคีย์) วันนี้ตั้งแต่ 08:00 · อัปเดตทุก 5 นาที">' +
+                    ? '<div class="okng" title="ยอดจาก ERP (พนักงานคีย์) วันนี้ตั้งแต่ 07:45 · อัปเดตทุก 5 นาที">' +
                       '<div class="ok"><span>OK · ERP</span><b>' + fmt(m.erpOut) + '</b></div>' +
                       '<div class="ng"><span>NG · ERP</span><b>' + fmt(m.erpNg) + '</b></div></div>'
                     : '<div class="okng"><div class="ok"><span>OK</span><b>' + fmt(m.okCount) + '</b></div>' +
@@ -850,7 +876,7 @@
                 return;
             }
 
-            var nowIdx = Math.floor((new Date() - new Date((d.dayStart || '').replace(' ', 'T'))) / 3600000);
+            var nowIdx = curSlot(new Date((d.dayStart || '').replace(' ', 'T')).getTime(), Date.now());
             var sig = curProc + '#' + list.map(function (m) { return m.machine + ':' + stOf(m); }).join('|');
             var grid = document.getElementById('imdGrid');
 
@@ -890,7 +916,7 @@
         function hm(t) { return t ? String(t).slice(11, 16) : ''; }
         function catHtml(c) { return '<span class="cat c-' + c + '"><i></i>' + (CAT[c] || c) + '</span>'; }
         function dayStr(d) { return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
-        function prodDay() { var d = new Date(); if (d.getHours() < 8) d.setDate(d.getDate() - 1); return dayStr(d); }
+        function prodDay() { var d = new Date(); if (beforeDs(d)) d.setDate(d.getDate() - 1); return dayStr(d); }
 
         function openDt(id) {
             var m = (lastData && lastData.machines || []).filter(function (x) { return x.machine === id; })[0];
@@ -997,7 +1023,7 @@
             return '<div class="oe-bar">' + [7, 14, 30].map(function (n) { return '<button type="button" data-n="' + n + '"' + (!custom && n === oeeDays ? ' class="on"' : '') + '>' + n + ' days</button>'; }).join('') +
                 '<label>From <input type="date" id="oeFrom" value="' + f + '"' + (custom ? ' class="on"' : '') + ' /></label>' +
                 '<label>To <input type="date" id="oeTo" value="' + t + '"' + (custom ? ' class="on"' : '') + ' /></label>' +
-                '<span class="oe-info">' + (d ? nd + ' days · production day 08:00–08:00 · click a day to open it in the other tabs' : '') + '</span></div>';
+                '<span class="oe-info">' + (d ? nd + ' days · production day ' + DS_TXT + '–' + DS_TXT + ' · click a day to open it in the other tabs' : '') + '</span></div>';
         }
         function bindOeeBar() {
             [].forEach.call(document.querySelectorAll('#dtOee .oe-bar button'), function (b) {
@@ -1124,7 +1150,7 @@
                 '<div><span>Longest Stop</span><b>' + (longest ? dur(longest.sec) : '–') + '</b><em>' +
                     (longest ? (CAT[longest.cat] || '') + ' ' + hm(longest.start) + '–' + (longest.end ? hm(longest.end) : 'Now') : '') + '</em></div>' +
                 '</div>';
-            // timeline 08:00 -> 08:00
+            // timeline 07:45 -> 07:45
             var segs = [], pos = t0;
             ev.forEach(function (e) {
                 var a = Math.max(t0, new Date(String(e.start).replace(' ', 'T')).getTime());
@@ -1133,28 +1159,28 @@
                 if (b > a) segs.push('<i class="' + e.cat + '" title="' + (CAT[e.cat] || e.cat) + ' ' + hm(e.start) + ' · ' + dur(e.sec) + '" style="width:' + ((b - a) * 100 / span) + '%"></i>');
                 pos = Math.max(pos, b);
             });
-            var ax = [0, 4, 8, 12, 16, 20, 24].map(function (h) { return '<span>' + ('0' + ((8 + h) % 24)).slice(-2) + ':00</span>'; }).join('');
+            var ax = [0, 4, 8, 12, 16, 20, 24].map(function (h) { return '<span>' + tickLbl(h) + '</span>'; }).join('');
             // ยอดผลิตรายชั่วโมง (เหนือ Timeline) : วันนี้ใช้ค่าสดจากเครื่อง · วันก่อนใช้ค่าที่บันทึกใน DB (mc_hourly) · ชิ้น = Shot × Cavity
             var mcNow = (lastData && lastData.machines || []).filter(function (x) { return x.machine === d.machine; })[0];
             var cav = mcNow && mcNow.cavities > 0 ? mcNow.cavities : 1;
             var isToday = mcNow && String(d.dayStart).slice(0, 10) === String(lastData.dayStart || '').slice(0, 10);
-            var hs = (isToday && mcNow.hourly ? mcNow.hourly.map(function (h) { return h.shots || 0; }) : (d.hours || [])).slice(0, 24);
-            while (hs.length < 24) hs.push(0);
-            var curH = Math.floor((nowT - t0) / 3600e3), hmax = 1, htot = 0, hbest = -1;
+            var hs = (isToday && mcNow.hourly ? mcNow.hourly.map(function (h) { return h.shots || 0; }) : (d.hours || [])).slice(0, NSLOT);
+            while (hs.length < NSLOT) hs.push(0);
+            var curH = curSlot(t0, nowT), hmax = 1, htot = 0, hbest = -1;
             hs.forEach(function (v, i) { if (i <= curH) { hmax = Math.max(hmax, v); htot += v; if (hbest < 0 || v > hs[hbest]) hbest = i; } });
             // ตารางยอดรายชั่วโมง : แถวบน = ชั่วโมง · แถวล่าง = ยอด (ชิ้น) · ชั่วโมงที่ยังไม่ถึงเว้นว่าง
             var hth = '', htd = '';
             hs.forEach(function (v, i) {
-                var fut = i > curH, lbl = ('0' + ((8 + i) % 24)).slice(-2) + ':00', c = i === curH ? ' class="cur"' : '';
-                hth += '<th' + c + '>' + lbl + '</th>';
+                var fut = i > curH, lbl = slotRange(i), c = i === curH ? ' class="cur"' : '';
+                hth += '<th' + c + ' title="' + lbl + '">' + lbl + '</th>';
                 htd += '<td class="' + (i === curH ? 'cur ' : '') + (!fut && v === 0 ? 'zero ' : '') + (i === hbest && v ? 'best' : '') + '" title="' + lbl + ' · ' + fmt(v) + ' shots' + (cav > 1 ? ' × ' + cav + ' = ' + fmt(v * cav) + ' pcs' : '') + '">' +
                        (fut ? '' : fmt(v * cav)) + '</td>';
             });
-            var hr = '<table class="dt-ht"><thead><tr>' + hth + '<th class="tot" style="width:6%">Total</th></tr></thead><tbody><tr>' + htd + '<td class="tot">' + fmt(htot * cav) + '</td></tr></tbody></table>';
+            var hr = '<div class="dt-htw"><table class="dt-ht"><thead><tr>' + hth + '<th class="tot" style="width:6%">Total</th></tr></thead><tbody><tr>' + htd + '<td class="tot">' + fmt(htot * cav) + '</td></tr></tbody></table></div>';
             var hrSum = '<div class="dt-hrsum"><span>Output per hour (' + (cav > 1 ? 'pcs = shots × ' + cav + ' cavities' : 'shots') + ')</span><span>Total <b>' + fmt(htot * cav) + '</b>' +
-                (hbest >= 0 && hs[hbest] ? ' · best ' + ('0' + ((8 + hbest) % 24)).slice(-2) + ':00 <b>' + fmt(hs[hbest] * cav) + '</b>' : '') +
-                ' · avg <b>' + fmt(curH >= 0 ? htot * cav / Math.max(1, Math.min(24, curH + 1)) : 0) + '</b>/h</span></div>';
-            var tl = '<h4>Production Day Timeline (08:00 – 08:00)</h4>' + hrSum + hr + '<div class="dt-tl">' + segs.join('') + '</div><div class="dt-ax">' + ax + '</div>';
+                (hbest >= 0 && hs[hbest] ? ' · best ' + slotRange(hbest) + ' <b>' + fmt(hs[hbest] * cav) + '</b>' : '') +
+                ' · avg <b>' + fmt(curH >= 0 ? htot * cav / Math.max(1, (nowT - t0) / 3600e3) : 0) + '</b>/h</span></div>';
+            var tl = '<h4>Production Day Timeline (' + DS_TXT + ' – ' + DS_TXT + ')</h4>' + hrSum + hr + '<div class="dt-tl">' + segs.join('') + '</div><div class="dt-ax">' + ax + '</div>';
             // ตารางเครื่องหยุด เรียงตามนานสุด
             var maxS = stops.reduce(function (a, e) { return Math.max(a, e.sec); }, 1);
             var srows = stops.slice().sort(function (a, b) { return b.sec - a.sec; }).map(function (e) {

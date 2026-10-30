@@ -145,7 +145,7 @@
 <asp:Content ID="cMain" ContentPlaceHolderID="MainContent" runat="server">
 <div class="ij" id="ij">
     <div class="ij-top">
-        <div class="ij-brand"><h1>INJECTION <span>PVC</span></h1><small id="sub">Live OEE · production day 08:00 – 08:00</small></div>
+        <div class="ij-brand"><h1>INJECTION <span>PVC</span></h1><small id="sub">Live OEE · production day 07:45 – 07:45</small></div>
         <div class="kp o" id="kO"></div>
         <div class="kp apq3" id="kAPQ"></div>
         <div class="kp cn"><div class="cnt" id="cnt"></div></div>
@@ -178,6 +178,22 @@
 <asp:Content ID="cScript" ContentPlaceHolderID="ScriptContent" runat="server">
 <script>
 // @ts-nocheck
+// ---- เวลาเริ่มวันผลิต (จาก CounterStore.DAY_START บน Server) · ช่องรายชั่วโมง 07:45–07:59 | 08:00–08:59 | ... | 07:00–07:44 ----
+<%= Dashbord.CounterStore.JsDayStart %>
+var DS_TXT = ('0' + DS_H).slice(-2) + ':' + ('0' + DS_M).slice(-2);
+function slotLbl(i) { return i === 0 ? DS_TXT : ('0' + ((DS_H + i) % 24)).slice(-2) + ':00'; }
+function slotOf(t0, t) {                                   // t0, t = ms · ช่องของเวลา t ในวันที่เริ่ม t0 (-1 = นอกวัน)
+    var m = (t - t0) / 60000, f = DS_M ? 60 - DS_M : 0;
+    if (m < 0 || m >= 1440) return -1;
+    if (f && m < f) return 0;
+    var i = Math.floor((m - f) / 60) + (f ? 1 : 0);
+    return i < NSLOT ? i : -1;
+}
+function curSlot(t0, t) { return t >= t0 + 864e5 ? NSLOT - 1 : slotOf(t0, t); }
+function tickLbl(h) { var m = DS_H * 60 + DS_M + h * 60; return ('0' + (Math.floor(m / 60) % 24)).slice(-2) + ':' + ('0' + (m % 60)).slice(-2); }
+function beforeDs(d) { return d.getHours() * 60 + d.getMinutes() < DS_H * 60 + DS_M; }
+function slotMin(i) { return DS_M && i === 0 ? 60 - DS_M : DS_M && i === NSLOT - 1 ? DS_M : 60; }   // ความยาวช่อง (นาที)
+function slotHours(n) { var s = 0; for (var i = 0; i < n && i < NSLOT; i++) s += slotMin(i); return s / 60; }   // ชั่วโมงรวมของ n ช่องแรก
 (function () {
     var $ = function (id) { return document.getElementById(id); };
     var CAT = { run: 'RUN', idle: 'IDLE', down: 'DOWN', off: 'OFF' };
@@ -214,7 +230,7 @@
         var hrs = m.hours || [], mx = 1;
         for (var i = 0; i <= hourIdx && i < hrs.length; i++) mx = Math.max(mx, hrs[i]);
         var sp = '';
-        for (var j = 0; j <= hourIdx && j < hrs.length; j++) sp += '<i' + (j === hourIdx ? ' class="cur"' : '') + ' style="height:' + Math.max(2, hrs[j] * 100 / mx) + '%" title="' + ('0' + ((8 + j) % 24)).slice(-2) + ':00 · ' + hrs[j] + ' shots"></i>';
+        for (var j = 0; j <= hourIdx && j < hrs.length; j++) sp += '<i' + (j === hourIdx ? ' class="cur"' : '') + ' style="height:' + Math.max(2, hrs[j] * 100 / mx) + '%" title="' + slotLbl(j) + ' · ' + hrs[j] + ' shots"></i>';
         var ct = m.cycleTime != null ? (+m.cycleTime).toFixed(1) : '–', sct = m.idealCycleTime != null ? '/' + (+m.idealCycleTime).toFixed(0) + 's' : 's';
         return '<div class="mc ' + c + extra + '" data-mc="' + esc(m.machine) + '" title="' + esc(m.eqid || m.machine) + '">' +
             '<div class="hd"><span class="id">' + code + '</span><span class="pill">' + CAT[c] + '</span></div>' +
@@ -256,7 +272,7 @@
         });
         seam.sort(function (a, b) { return String(a.eqid || a.machine).localeCompare(String(b.eqid || b.machine), undefined, { numeric: true }); });
         var now = new Date(String(d.now).replace(' ', 'T')), ds = new Date(String(d.dayStart).replace(' ', 'T'));
-        var hourIdx = Math.max(0, Math.min(23, Math.floor((now - ds) / 3600e3)));
+        var hourIdx = Math.max(0, curSlot(+ds, +now));
         function rowHtml(r, n) { var h = ''; for (var i = 1; i <= n; i++) h += tile(r + '-' + i, by[r + '-' + i], hourIdx); return h; }
         $('r1').innerHTML = rowHtml(1, 8);
         $('r2').innerHTML = rowHtml(2, 8);

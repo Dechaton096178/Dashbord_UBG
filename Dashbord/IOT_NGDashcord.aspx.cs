@@ -38,9 +38,9 @@ namespace Dashbord
         {
             if (!IsPostBack)
             {
-                // Start Date ย้อนหลัง 7 วัน, End Date = วันนี้
+                // ค่าเริ่มต้น = วันนี้ทั้ง Start / End (2026-10-28 เดิมย้อนหลัง 7 วัน)
                 // (เก็บเป็น yyyy-MM-dd ส่วนหน้าจอแสดง dd/mm/yyyy ด้วย flatpickr)
-                txtFrom.Text = DateTime.Now.AddDays(-7).ToString("yyyy-MM-dd");
+                txtFrom.Text = DateTime.Now.ToString("yyyy-MM-dd");
                 txtTo.Text = DateTime.Now.ToString("yyyy-MM-dd");
 
                 LoadProcess();      // [NEW] Process จาก CMSMW

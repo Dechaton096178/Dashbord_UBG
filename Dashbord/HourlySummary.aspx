@@ -1,7 +1,7 @@
 ﻿<%@ Page Title="Hourly Output by Process" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="HourlySummary.aspx.cs" Inherits="Dashbord.HourlySummary" %>
 
 <%-- =====================================================================
-     Summary by Process — ยอดผลิตรายชั่วโมง (08:00 – 07:00) แต่ละ Process · กดที่ Process เพื่อดูรายเครื่อง
+     Summary by Process — ยอดผลิตรายชั่วโมง (07:45 – 07:44 · ช่องแรก 07:45–07:59, ช่องท้าย 07:00–07:44) แต่ละ Process · กดที่ Process เพื่อดูรายเครื่อง
      ข้อมูล : ?format=json (HourlySummary.aspx.cs) · ชิ้น = Shot × Cavity · ชุดเดียวกับ MC Monitor
      ===================================================================== --%>
 
@@ -29,7 +29,7 @@
     .hs-kpi em { font-style:normal; font-size:12px; color:var(--mute); }
 
     .hs-card { border:1px solid var(--line); border-radius:14px; background:var(--card); overflow:auto; }
-    .hs table { width:100%; min-width:1150px; border-collapse:collapse; table-layout:fixed; font-size:12.5px; color:var(--ink); }
+    .hs table { width:100%; min-width:2750px; border-collapse:collapse; table-layout:fixed; font-size:12.5px; color:var(--ink); }
     .hs th, .hs td { border:1px solid var(--line); padding:7px 3px; text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .hs thead th { background:var(--card2); color:var(--mute); font-weight:800; font-size:11.5px; text-align:center; position:sticky; top:0; z-index:2; }
     .hs th.nm, .hs td.nm { text-align:left; width:200px; padding-left:10px; position:sticky; left:0; background:var(--card); z-index:1; }
@@ -43,6 +43,10 @@
     .hs tr.mc td { font-size:11.5px; color:#cbd5e1; background:rgba(17,28,51,.55); }
     .hs tr.mc td.nm { padding-left:28px; color:#cbd5e1; background:#0c1424; }
     .hs tr.mc td.nm small { color:var(--mute); margin-left:6px; }
+    .hs th.hr { width:96px; font-size:12px; letter-spacing:.2px; }   /* หัวคอลัมน์ช่วงเวลา 1 บรรทัด · ตารางกว้าง -> เลื่อนด้วย scrollbar */
+    .hs-card { scrollbar-color:#475569 #0b1220; }
+    .hs-card::-webkit-scrollbar { height:12px; width:12px; } .hs-card::-webkit-scrollbar-track { background:#0b1220; border-radius:8px; }
+    .hs-card::-webkit-scrollbar-thumb { background:#475569; border-radius:8px; border:2px solid #0b1220; } .hs-card::-webkit-scrollbar-thumb:hover { background:#64748b; }
     .hs td.cur, .hs th.cur { background:rgba(99,102,241,.14) !important; }
     .hs td.z { color:#64748b !important; font-weight:600; }
     .hs td.best { color:#34d399 !important; }
@@ -58,7 +62,7 @@
 <asp:Content ID="cMain" ContentPlaceHolderID="MainContent" runat="server">
 <div class="hs">
     <div class="hs-top">
-        <h2>Summary by Process<small>Output per hour · production day 08:00 – 07:00</small></h2>
+        <h2>Summary by Process<small>Output per hour · production day <span id="dsTxt">07:45 – 07:45</span></small></h2>
         <div class="hs-ctl">
             <button type="button" id="dPrev" title="Previous day">&#9664;</button>
             <input type="date" id="dDay" />
@@ -82,6 +86,28 @@
 <asp:Content ID="cScript" ContentPlaceHolderID="ScriptContent" runat="server">
 <script>
 // @ts-nocheck
+    // ---- เวลาเริ่มวันผลิต (จาก CounterStore.DAY_START บน Server) · ช่องรายชั่วโมง 07:45–07:59 | 08:00–08:59 | ... | 07:00–07:44 ----
+    <%= Dashbord.CounterStore.JsDayStart %>
+    var DS_TXT = ('0' + DS_H).slice(-2) + ':' + ('0' + DS_M).slice(-2);
+    function slotLbl(i) { return i === 0 ? DS_TXT : ('0' + ((DS_H + i) % 24)).slice(-2) + ':00'; }
+    function slotOf(t0, t) {                                   // t0, t = ms · ช่องของเวลา t ในวันที่เริ่ม t0 (-1 = นอกวัน)
+        var m = (t - t0) / 60000, f = DS_M ? 60 - DS_M : 0;
+        if (m < 0 || m >= 1440) return -1;
+        if (f && m < f) return 0;
+        var i = Math.floor((m - f) / 60) + (f ? 1 : 0);
+        return i < NSLOT ? i : -1;
+    }
+    function curSlot(t0, t) { return t >= t0 + 864e5 ? NSLOT - 1 : slotOf(t0, t); }
+    function tickLbl(h) { var m = DS_H * 60 + DS_M + h * 60; return ('0' + (Math.floor(m / 60) % 24)).slice(-2) + ':' + ('0' + (m % 60)).slice(-2); }
+    function beforeDs(d) { return d.getHours() * 60 + d.getMinutes() < DS_H * 60 + DS_M; }
+    function slotEnd(i) {                                       // เวลาสิ้นสุดช่อง เช่น 07:59 · 08:59 · 07:44
+        var e = DS_M && i === NSLOT - 1 ? DS_M - 1 : 59, h = DS_M && i === NSLOT - 1 ? DS_H : (DS_H + i) % 24;
+        return ('0' + h).slice(-2) + ':' + ('0' + e).slice(-2);
+    }
+    function slotRange(i) { return slotLbl(i) + '-' + slotEnd(i); }                 // 07:45-07:59
+    function slotTh(i) { return slotLbl(i) + '-<br>' + slotEnd(i); }                // หัวคอลัมน์ 2 บรรทัดในช่องเดียว
+    function slotMin(i) { return DS_M && i === 0 ? 60 - DS_M : DS_M && i === NSLOT - 1 ? DS_M : 60; }   // ความยาวช่อง (นาที)
+    function slotHours(n) { var s = 0; for (var i = 0; i < n && i < NSLOT; i++) s += slotMin(i); return s / 60; }   // ชั่วโมงรวมของ n ช่องแรก
 (function () {
     var $ = function (id) { return document.getElementById(id); };
     var ORDER = JSON.parse($('procJson').textContent || '[]');
@@ -90,11 +116,12 @@
     function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
     function fmt(v) { return v == null ? '' : Math.round(v).toLocaleString('en-US'); }
     function dayStr(d) { return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
-    function prodDay() { var d = new Date(); if (d.getHours() < 8) d.setDate(d.getDate() - 1); return dayStr(d); }
+    function prodDay() { var d = new Date(); if (beforeDs(d)) d.setDate(d.getDate() - 1); return dayStr(d); }
     function addDays(s, n) { var d = new Date(s + 'T00:00:00'); d.setDate(d.getDate() + n); return dayStr(d); }
     function cur() { return st.day || prodDay(); }
     function mname(m) { var e = String(m.eqid || '').replace(/^\s*\d+\s*[.\-:]\s*/, '').trim(); return e || m.machineNo || m.machine; }
-    var HRS = []; for (var i = 0; i < 24; i++) HRS.push(('0' + ((8 + i) % 24)).slice(-2) + ':00');
+    var HRS = []; for (var i = 0; i < NSLOT; i++) HRS.push(slotLbl(i));
+    if ($('dsTxt')) $('dsTxt').textContent = DS_TXT + ' – ' + DS_TXT;
 
     (function () { var p = new URLSearchParams(location.search); if (/^\d{4}-\d{2}-\d{2}$/.test(p.get('day') || '')) st.day = p.get('day'); if (p.get('unit') === 'shots') st.unit = 'shots'; })();
     function setDay(v) { if (!v) return; if (v > prodDay()) v = prodDay(); st.day = v === prodDay() ? '' : v; load(); }
@@ -132,9 +159,9 @@
     }
 
     function cells(h, curH, isProcess) {
-        var past = h.slice(0, Math.min(24, curH + 1)), tot = past.reduce(function (a, b) { return a + b; }, 0);
+        var past = h.slice(0, Math.min(NSLOT, curH + 1)), tot = past.reduce(function (a, b) { return a + b; }, 0);
         var mx = Math.max.apply(null, past.concat([0])), anyProd = tot > 0;
-        var full = past.filter(function (v, i) { return i < curH; }).length;   // ชั่วโมงที่ครบแล้ว (ไม่รวมชั่วโมงปัจจุบัน)
+        var full = slotHours(Math.max(0, curH));   // ชั่วโมงที่ครบแล้ว (ไม่รวมช่องปัจจุบัน · ช่อง 07:45 = 0.25 ชม.)
         var html = h.map(function (v, i) {
             if (i > curH) return '<td></td>';
             var c = (i === curH ? 'cur ' : '') + (v === 0 ? (anyProd && i < curH ? 'low ' : 'z ') : '') + (v === mx && v > 0 ? 'best' : '');
@@ -147,16 +174,16 @@
     function render() {
         var d = st.data; if (!d) return;
         $('uPcs').classList.toggle('on', st.unit === 'pcs'); $('uShots').classList.toggle('on', st.unit === 'shots');
-        var curH = d.today ? d.curHour : 23, gs = groups();
+        var curH = d.today ? d.curHour : NSLOT - 1, gs = groups();
         $('upd').textContent = (d.today ? 'live · updated ' + String(d.now).slice(11, 16) + ' · refresh 1 min' : d.day) + (d.error ? ' · ⚠ ' + d.error : '');
         // KPI : ยอดรวมวันนี้ของแต่ละ Process + เฉลี่ยต่อชั่วโมง
         $('kpi').innerHTML = gs.map(function (g) {
             var past = g.h.slice(0, curH + 1), tot = past.reduce(function (a, b) { return a + b; }, 0);
-            var done = Math.max(1, d.today ? curH : 24);
+            var done = d.today ? Math.max(0.25, slotHours(curH)) : 24;
             return '<div data-p="' + esc(g.name) + '"><span>' + esc(g.name) + '</span><b>' + fmt(tot) + '</b><em>' + fmt(d.today && curH > 0 ? past.slice(0, curH).reduce(function (a, b) { return a + b; }, 0) / done : tot / done) + ' / h · ' + g.list.length + ' mc</em></div>';
         }).join('') || '';
         if (!gs.length) { $('out').innerHTML = '<div class="hs-msg">No output recorded on ' + esc(d.day) + '</div>'; return; }
-        var head = '<thead><tr><th class="nm">Process / Machine</th>' + HRS.map(function (h, i) { return '<th' + (i === curH && d.today ? ' class="cur"' : '') + '>' + h + '</th>'; }).join('') +
+        var head = '<thead><tr><th class="nm">Process / Machine</th>' + HRS.map(function (h, i) { return '<th class="hr' + (i === curH && d.today ? ' cur' : '') + '" title="' + slotRange(i) + '">' + slotRange(i) + '</th>'; }).join('') +
             '<th class="tot">Total</th><th class="avg" title="Average per completed hour">Avg/h</th></tr></thead>';
         var body = '', grand = HRS.map(function () { return 0; });
         gs.forEach(function (g) {
@@ -176,7 +203,7 @@
     // Export CSV (ตามหน่วยที่เลือก · รวมรายเครื่อง)
     $('btnCsv').onclick = function () {
         var d = st.data; if (!d) return;
-        var curH = d.today ? d.curHour : 23, lines = [['Process', 'Machine'].concat(HRS).concat(['Total']).join(',')];
+        var curH = d.today ? d.curHour : NSLOT - 1, lines = [['Process', 'Machine'].concat(HRS.map(function (_, i) { return slotRange(i); })).concat(['Total']).join(',')];
         groups().forEach(function (g) {
             function row(name, mc, h) { var p = h.map(function (v, i) { return i > curH ? '' : v; }); return [name, mc].concat(p).concat([h.slice(0, curH + 1).reduce(function (a, b) { return a + b; }, 0)]).join(','); }
             lines.push(row(g.name, 'ALL', g.h));
